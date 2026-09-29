@@ -111,3 +111,21 @@ def test_fetch_oauth_ok(monkeypatch):
     out = m.fetch_claude_oauth(pathlib.Path("/nonexistent"))
     assert out["status"] == "ok"
     assert out["five_hour"]["utilization"] == 31.0
+
+
+def test_expired_status(tmp_path, monkeypatch):
+    """期限切れ資格情報 → CLI再取得が不発なら expired (未設定と区別)。"""
+    import json as _json
+    import time as _time
+
+    creds = tmp_path / ".claude" / ".credentials.json"
+    creds.parent.mkdir(parents=True)
+    creds.write_text(_json.dumps({"claudeAiOauth": {
+        "accessToken": "old", "refreshToken": "r",
+        "expiresAt": int(_time.time() * 1000) - 3600_000}}), encoding="utf-8")
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setattr(m, "_cli_refresh_creds", lambda home: False)
+    monkeypatch.setattr(m, "_refresh_oauth", lambda refresh: "")
+    out = m.fetch_claude_oauth(tmp_path)
+    assert out["status"] == "expired"
+    assert m.claude_has_creds(tmp_path) is True

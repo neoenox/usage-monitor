@@ -197,10 +197,13 @@ class App(tk.Tk):
                 else:
                     clw = used
             self.cl_models.config(text=self._models_label(oauth))
-        elif oauth.get("status") == "missing_token":
+        elif oauth.get("status") in ("missing_token", "expired"):
             self.cl_bar5["value"] = 0
             self.cl_barW["value"] = 0
-            self.cl_lbl5.config(text="未設定: claude setup-token → トークンを環境変数か ~/.claude_oauth_token へ")
+            if oauth.get("status") == "expired":
+                self.cl_lbl5.config(text="トークン期限切れ: claudeを一度使うと自動復旧します")
+            else:
+                self.cl_lbl5.config(text="未設定: claude auth login を実行してください")
             self.cl_lblW.config(text="")
             self.cl_models.config(text="")
         else:

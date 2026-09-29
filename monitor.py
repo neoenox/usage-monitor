@@ -21,6 +21,8 @@ CLAUDE_USAGE_BETA = "oauth-2025-04-20"
 CLAUDE_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
 CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Claude Code public OAuth client
 CLAUDE_CRED_TARGET = "Claude Code-credentials"  # OS credential store service name
+BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 
 
 def fmt_num(n: int) -> str:
@@ -269,6 +271,7 @@ def claude_token(home: Path) -> str:
     Order: env CLAUDE_CODE_OAUTH_TOKEN / ~/.claude_oauth_token file /
     ~/.claude/.credentials.json (written by `claude auth login`) /
     OS credential store entry (with refresh when expired).
+    期限切れ時は公式CLIに再取得させる (30分クールダウン)。
     """
     tok = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
     if tok:
@@ -281,16 +284,30 @@ def claude_token(home: Path) -> str:
                 return tok
     except Exception:
         pass
+    for _ in range(2):  # 初回 + CLI再取得後の再読込
+        try:
+            p = home / ".claude" / ".credentials.json"
+            if p.exists():
+                creds = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
+                tok = _resolve_oauth_access(creds.get("claudeAiOauth") or {})
+                if tok:
+                    return tok
+                if _cli_refresh_creds(home):
+                    continue
+                return ""
+        except Exception:
+            pass
+        break
+    return claude_token_from_os_store()
+
+
+def claude_has_creds(home: Path) -> bool:
     try:
-        p = home / ".claude" / ".credentials.json"
-        if p.exists():
-            creds = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
-            tok = _resolve_oauth_access(creds.get("claudeAiOauth") or {})
-            if tok:
-                return tok
+        if (home / ".claude" / ".credentials.json").exists():
+            return True
     except Exception:
         pass
-    return claude_token_from_os_store()
+    return bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip())
 
 
 def _resolve_oauth_access(oauth: dict) -> str:
@@ -307,6 +324,11 @@ def _resolve_oauth_access(oauth: dict) -> str:
     refresh = str(oauth.get("refreshToken") or "")
     if not refresh:
         return access  # try anyway; API will tell
+    return _refresh_oauth(refresh)
+
+
+def _refresh_oauth(refresh: str) -> str:
+    """リフレッシュ1回のみ (リトライループ禁止: エンドポイントが厳格)。"""
     try:
         body = json.dumps(
             {
@@ -316,13 +338,51 @@ def _resolve_oauth_access(oauth: dict) -> str:
             }
         ).encode()
         req = urllib.request.Request(
-            CLAUDE_TOKEN_URL, data=body, headers={"Content-Type": "application/json"}
+            CLAUDE_TOKEN_URL, data=body,
+            headers={"Content-Type": "application/json", "User-Agent": BROWSER_UA,
+                     "Accept": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=10) as res:
             data = json.loads(res.read().decode("utf-8", "ignore"))
         return str(data.get("access_token") or "")
     except Exception:
         return ""
+
+
+def _cli_refresh_creds(home: Path) -> bool:
+    """公式CLIに極小APIコールを1発投げて資格情報ファイルを更新させる。
+    30分クールダウン。成功時True。
+    """
+    import shutil
+    import subprocess
+    import time
+
+    if not shutil.which("claude"):
+        return False
+    try:
+        from pathlib import Path as _P
+
+        import os as _os
+
+        mark = _P(_os.environ.get("LOCALAPPDATA", str(home))) / "usage-monitor" / ".cli_refresh"
+        if mark.exists() and time.time() - mark.stat().st_mtime < 1800:
+            return False
+    except Exception:
+        pass
+    try:
+        subprocess.run(
+            ["claude", "-p", "ping", "--output-format", "text"],
+            capture_output=True, timeout=120,
+            cwd=str(home),
+        )
+        try:
+            mark.parent.mkdir(parents=True, exist_ok=True)
+            mark.write_text("1", encoding="utf-8")
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
 
 
 def claude_token_from_os_store() -> str:
@@ -383,11 +443,13 @@ def fetch_claude_oauth(home: Path) -> dict:
 
     Returns {"status": "ok", "five_hour": {...}, "seven_day": {...}}
     or {"status": "missing_token" | "error", "detail": ...}.
-    Token: `claude setup-token` once, then env CLAUDE_CODE_OAUTH_TOKEN
+    Token: `claude auth login` (auto-read) or env CLAUDE_CODE_OAUTH_TOKEN
     or write it to ~/.claude_oauth_token.
     """
     tok = claude_token(home)
     if not tok:
+        if claude_has_creds(home):
+            return {"status": "expired"}
         return {"status": "missing_token"}
     try:
         req = urllib.request.Request(
@@ -493,8 +555,10 @@ def main() -> int:
             except (TypeError, ValueError):
                 print(f"  {label:<8}: -")
     elif oauth.get("status") == "missing_token":
-        print("  subscription usage: no token. Run `claude setup-token`, then set")
-        print("  env CLAUDE_CODE_OAUTH_TOKEN or write token to ~/.claude_oauth_token")
+        print("  subscription usage: no token. Run `claude auth login` once.")
+    elif oauth.get("status") == "expired":
+        print("  subscription usage: token expired, auto-refresh failed.")
+        print("  Use claude once (or wait); next refresh retries automatically.")
     else:
         print(f"  subscription usage: error ({oauth.get('detail', '?')})")
     return 0
