@@ -100,6 +100,30 @@ def pace_label(used: float | None, window_min: int, reset_epoch: int | None,
     return f"このままだと{fmt_ts(hit)}頃枯渇"
 
 
+def week_pace(used: float | None, window_min: int, reset_epoch: int | None) -> str:
+    """週窓のペース判定: 経過%に対する使用%。over/under/on pace。
+    短窓(5h)はブレが大きいため週窓用。"""
+    import time
+
+    try:
+        used = float(used) if used is not None else None
+        reset_epoch = int(float(reset_epoch))
+    except (TypeError, ValueError):
+        return "-"
+    if used is None or window_min <= 0:
+        return "-"
+    now = int(time.time())
+    elapsed = now - (reset_epoch - window_min * 60)
+    if elapsed <= 0:
+        return "-"
+    expected = elapsed / (window_min * 60) * 100
+    if used >= expected * 1.1:
+        return f"over pace (経過{expected:.0f}%に対し使用{used:.0f}%)"
+    if used <= expected * 0.9:
+        return f"under pace (経過{expected:.0f}%に対し使用{used:.0f}%)"
+    return f"on pace (経過{expected:.0f}%/使用{used:.0f}%)"
+
+
 def fmt_ts_iso(s: str | None) -> str:
     if not s:
         return "-"
@@ -428,7 +452,8 @@ def main() -> int:
               f"[{pace_label(p_used, 300, pri.get('resets_at'), h5)}]")
         print(f"  weekly  : {100 - s_used:.0f}% left (used {s_used:.0f}%) "
               f"reset={fmt_ts(sec.get('resets_at'))} ({fmt_countdown(sec.get('resets_at'))}) "
-              f"[{pace_label(s_used, 10080, sec.get('resets_at'), hw)}]")
+              f"[{pace_label(s_used, 10080, sec.get('resets_at'), hw)}] "
+              f"<{week_pace(s_used, 10080, sec.get('resets_at'))}>")
         ctx = codex.get("context", {}) or {}
         if ctx:
             print(f"  context : {ctx['pct']}% ({fmt_num(ctx['input'])}/{fmt_num(ctx['window'])})")
@@ -460,8 +485,11 @@ def main() -> int:
                 left = 100 - float(u)
                 pace = pace_label(float(u), win_min.get(key, 0),
                                   iso_to_epoch(w.get("resets_at")), hist_of.get(key, []))
+                extra = ""
+                if key == "seven_day":
+                    extra = f" <{week_pace(float(u), 10080, iso_to_epoch(w.get('resets_at')))}>"
                 print(f"  {label:<8}: {left:.0f}% left (used {float(u):.0f}%) "
-                      f"reset={fmt_ts_iso(w.get('resets_at'))} ({fmt_countdown(w.get('resets_at'))}) [{pace}]")
+                      f"reset={fmt_ts_iso(w.get('resets_at'))} ({fmt_countdown(w.get('resets_at'))}) [{pace}]{extra}")
             except (TypeError, ValueError):
                 print(f"  {label:<8}: -")
     elif oauth.get("status") == "missing_token":

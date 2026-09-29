@@ -157,7 +157,8 @@ class App(tk.Tk):
         self.barW["value"] = 100 - s_used
         self.lblW.config(text=self._codex_label("週", s_used, sec.get("resets_at"), m.fmt_ts,
                                                 m.pace_label(s_used, 10080, sec.get("resets_at"),
-                                                             h.recent("codex_wk"))))
+                                                             h.recent("codex_wk"))
+                                                + f" <{m.week_pace(s_used, 10080, sec.get('resets_at'))}>"))
         ctx = codex.get("context", {}) or {}
         if ctx:
             self.barCtx["value"] = ctx["pct"]
@@ -187,8 +188,10 @@ class App(tk.Tk):
                 hist_key = "claude_5h" if key == "five_hour" else "claude_wk"
                 pace = m.pace_label(used, win_min, m.iso_to_epoch(w.get("resets_at")),
                                     h.recent(hist_key))
+                extra = (f" <{m.week_pace(used, 10080, m.iso_to_epoch(w.get('resets_at')))}>"
+                         if key == "seven_day" else "")
                 lbl.config(text=f"{tag} 残り{100 - used:.0f}% (使用{used:.0f}%) "
-                                f"reset={m.fmt_ts_iso(w.get('resets_at'))} ({m.fmt_countdown(w.get('resets_at'))}) [{pace}]")
+                                f"reset={m.fmt_ts_iso(w.get('resets_at'))} ({m.fmt_countdown(w.get('resets_at'))}) [{pace}]{extra}")
                 if key == "five_hour":
                     cl5 = used
                 else:
@@ -260,7 +263,8 @@ class App(tk.Tk):
                 m.pace_label(pu, 300, pri.get("resets_at"), h.recent("codex_5h"))))
             self.lblW.config(text=self._codex_label(
                 "週", su, sec.get("resets_at"), m.fmt_ts,
-                m.pace_label(su, 10080, sec.get("resets_at"), h.recent("codex_wk"))))
+                m.pace_label(su, 10080, sec.get("resets_at"), h.recent("codex_wk"))
+                + f" <{m.week_pace(su, 10080, sec.get('resets_at'))}>"))
         except (TypeError, ValueError):
             pass
         oauth = claude.get("oauth", {}) or {}
@@ -273,8 +277,10 @@ class App(tk.Tk):
                     used = float(w.get("utilization"))
                     pace = m.pace_label(used, win_min, m.iso_to_epoch(w.get("resets_at")),
                                         h.recent(hist_key))
+                    extra = (f" <{m.week_pace(used, 10080, m.iso_to_epoch(w.get('resets_at')))}>"
+                             if key == "seven_day" else "")
                     lbl.config(text=f"{tag} 残り{100 - used:.0f}% (使用{used:.0f}%) "
-                                    f"reset={m.fmt_ts_iso(w.get('resets_at'))} ({m.fmt_countdown(w.get('resets_at'))}) [{pace}]")
+                                    f"reset={m.fmt_ts_iso(w.get('resets_at'))} ({m.fmt_countdown(w.get('resets_at'))}) [{pace}]{extra}")
                 except (TypeError, ValueError):
                     pass
         self.after(60 * 1000, self._tick)

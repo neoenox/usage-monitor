@@ -49,6 +49,18 @@ def test_pace_label():
     assert "枯渇" in lbl
 
 
+def test_week_pace():
+    now = int(time.time())
+    # 週窓の半分経過で使用80% → over
+    reset = now + 7 * 86400 // 2
+    assert m.week_pace(80.0, 10080, reset).startswith("over pace")
+    # 半分経過で使用10% → under
+    assert m.week_pace(10.0, 10080, reset).startswith("under pace")
+    # 半分経過で使用50% → on
+    assert m.week_pace(50.0, 10080, reset).startswith("on pace")
+    assert m.week_pace(None, 10080, reset) == "-"
+
+
 def test_fmt_countdown_invalid():
     assert m.fmt_countdown(None) == "-"
     assert m.fmt_countdown("xx") == "-"
