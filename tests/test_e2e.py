@@ -81,6 +81,20 @@ def test_tray_click_e2e():
         assert not th.is_alive()
 
 
+def test_debug_log_rotation(tmp_path):
+    """tray-debug.logは上限行で切り詰められる。"""
+    import tray_win32
+
+    p = tmp_path / "tray-debug.log"
+    p.write_text("\n".join(f"line {i}" for i in range(500)) + "\n", encoding="utf-8")
+    # 64KB未満は触らない
+    tray_win32._rotate_debug_log(p)
+    assert len(p.read_text(encoding="utf-8").splitlines()) == 500
+    p.write_bytes(b"x" * (64 * 1024 + 10) + b"\nline\n")
+    tray_win32._rotate_debug_log(p)
+    assert len(p.read_text(encoding="utf-8", errors="ignore").splitlines()) <= 200
+
+
 class _FakeTray:
     def __init__(self):
         self.balloons: list[tuple[str, str, bool]] = []
