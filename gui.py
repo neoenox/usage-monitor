@@ -61,7 +61,7 @@ def set_autostart(on: bool) -> bool:
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Usage Monitor - codex + claude")
+        self.title(f"Usage Monitor v{m.__version__} - codex + claude")
         self.geometry("560x920")
         self._tick_job: str | None = None
         self._set_window_icon()

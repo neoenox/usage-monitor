@@ -16,6 +16,8 @@ import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+__version__ = "0.5.0"
+
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CLAUDE_USAGE_BETA = "oauth-2025-04-20"
 CLAUDE_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
@@ -531,6 +533,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="codex + claude usage snapshot")
     ap.add_argument("--json", action="store_true", help="JSON出力")
     ap.add_argument("--home", default=os.path.expanduser("~"), help="ホームディレクトリ")
+    ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     args = ap.parse_args()
     home = Path(args.home)
 

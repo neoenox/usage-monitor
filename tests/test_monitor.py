@@ -12,6 +12,12 @@ def test_fmt_num():
     assert m.fmt_num(1234567) == "1,234,567"
 
 
+def test_version():
+    import re as _re
+
+    assert _re.fullmatch(r"\d+\.\d+\.\d+", m.__version__), m.__version__
+
+
 def test_fmt_countdown_future():
     assert m.fmt_countdown(int(time.time()) + 3700).startswith("あと1時間")
 
