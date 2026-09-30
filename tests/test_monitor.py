@@ -129,3 +129,35 @@ def test_expired_status(tmp_path, monkeypatch):
     out = m.fetch_claude_oauth(tmp_path)
     assert out["status"] == "expired"
     assert m.claude_has_creds(tmp_path) is True
+
+
+def test_claude_token_fake_home_does_not_read_os_store(tmp_path, monkeypatch):
+    """Synthetic/test HOME must never fall through to the real OS credential store."""
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+    def fail_if_called():
+        raise AssertionError("real OS credential store must not be read for a fake home")
+
+    monkeypatch.setattr(m, "claude_token_from_os_store", fail_if_called)
+    assert m.claude_token(tmp_path) == ""
+
+
+def test_cli_refresh_failure_does_not_start_cooldown(tmp_path, monkeypatch):
+    """A failed Claude CLI invocation must remain immediately retryable."""
+    import shutil
+    import subprocess
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(shutil, "which", lambda name: "claude.exe")
+
+    class Result:
+        returncode = 1
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    assert m._cli_refresh_creds(tmp_path) is False
+    mark = tmp_path / "usage-monitor" / ".cli_refresh"
+    assert not mark.exists()
+
+    Result.returncode = 0
+    assert m._cli_refresh_creds(tmp_path) is True
+    assert mark.exists()
