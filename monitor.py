@@ -223,6 +223,7 @@ def scan_codex(home: Path) -> dict:
         "total": total_in + total_out,
         "rate_limits": latest_rl or {},
         "rate_source": latest_rl_file,
+        "has_rate": latest_rl is not None,
         "context": context,
     }
 

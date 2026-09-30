@@ -129,3 +129,13 @@ def test_expired_status(tmp_path, monkeypatch):
     out = m.fetch_claude_oauth(tmp_path)
     assert out["status"] == "expired"
     assert m.claude_has_creds(tmp_path) is True
+
+
+def test_unlinked_home(tmp_path):
+    """空HOME: has_rate False・tooltipは未連携表示。"""
+    import gui
+
+    codex = m.scan_codex(tmp_path)
+    assert codex["files"] == 0 and codex["has_rate"] is False
+    tip = gui.tray_tooltip(codex, {"oauth": {"status": "missing_token"}})
+    assert "Codex 未連携" in tip

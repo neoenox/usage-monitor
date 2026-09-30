@@ -150,15 +150,21 @@ class App(tk.Tk):
         self.cx_tok.config(
             text=f"in {m.fmt_num(codex['input'])} / out {m.fmt_num(codex['output'])} / total {m.fmt_num(codex['total'])}"
         )
-        self.bar5["value"] = 100 - p_used
-        self.lbl5.config(text=self._codex_label("5h", p_used, pri.get("resets_at"), m.fmt_ts,
-                                                m.pace_label(p_used, 300, pri.get("resets_at"),
-                                                             h.recent("codex_5h"))))
-        self.barW["value"] = 100 - s_used
-        self.lblW.config(text=self._codex_label("週", s_used, sec.get("resets_at"), m.fmt_ts,
-                                                m.pace_label(s_used, 10080, sec.get("resets_at"),
-                                                             h.recent("codex_wk"))
-                                                + f" <{m.week_pace(s_used, 10080, sec.get('resets_at'))}>"))
+        if codex.get("has_rate"):
+            self.bar5["value"] = 100 - p_used
+            self.lbl5.config(text=self._codex_label(
+                "5h", p_used, pri.get("resets_at"), m.fmt_ts,
+                m.pace_label(p_used, 300, pri.get("resets_at"), h.recent("codex_5h"))))
+            self.barW["value"] = 100 - s_used
+            self.lblW.config(text=self._codex_label(
+                "週", s_used, sec.get("resets_at"), m.fmt_ts,
+                m.pace_label(s_used, 10080, sec.get("resets_at"), h.recent("codex_wk"))
+                + f" <{m.week_pace(s_used, 10080, sec.get('resets_at'))}>"))
+        else:
+            self.bar5["value"] = 0
+            self.barW["value"] = 0
+            self.lbl5.config(text="未連携: codex login 後に「更新」")
+            self.lblW.config(text="")
         ctx = codex.get("context", {}) or {}
         if ctx:
             self.barCtx["value"] = ctx["pct"]
@@ -256,6 +262,9 @@ class App(tk.Tk):
         if not hasattr(self, "_last"):
             return
         codex, claude = self._last
+        if not codex.get("has_rate"):
+            self.after(60 * 1000, self._tick)
+            return
         rl = codex.get("rate_limits", {}) or {}
         pri = rl.get("primary", {}) or {}
         sec = rl.get("secondary", {}) or {}
@@ -335,11 +344,14 @@ class App(tk.Tk):
 
 
 def tray_icon_image(pct_left: float):
-    """残量%に応じた色丸アイコン (緑/黄/赤)。"""
+    """残量%に応じた色丸アイコン (緑/黄/赤・負値は未連携グレー)。"""
     from PIL import Image, ImageDraw
 
-    v = max(0.0, min(100.0, float(pct_left)))
-    color = "#22c55e" if v >= 50 else ("#f59e0b" if v >= 20 else "#ef4444")
+    if pct_left is None or pct_left < 0:
+        color = "#9ca3af"
+    else:
+        v = max(0.0, min(100.0, float(pct_left)))
+        color = "#22c55e" if v >= 50 else ("#f59e0b" if v >= 20 else "#ef4444")
     img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     d.ellipse([6, 6, 58, 58], fill=color)
@@ -347,17 +359,22 @@ def tray_icon_image(pct_left: float):
 
 
 def tray_tooltip(codex: dict, claude: dict) -> str:
-    rl = codex.get("rate_limits", {}) or {}
-    pri = rl.get("primary", {}) or {}
-    sec = rl.get("secondary", {}) or {}
-    try:
-        cx5 = 100 - float(pri.get("used_percent") or 0)
-    except (TypeError, ValueError):
-        cx5 = -1
-    try:
-        cxw = 100 - float(sec.get("used_percent") or 0)
-    except (TypeError, ValueError):
-        cxw = -1
+    if codex.get("has_rate"):
+        rl = codex.get("rate_limits", {}) or {}
+        pri = rl.get("primary", {}) or {}
+        sec = rl.get("secondary", {}) or {}
+        try:
+            cx5 = 100 - float(pri.get("used_percent") or 0)
+        except (TypeError, ValueError):
+            cx5 = -1
+        try:
+            cxw = 100 - float(sec.get("used_percent") or 0)
+        except (TypeError, ValueError):
+            cxw = -1
+        cx = (f"Codex 5h残り{cx5:.0f}% / 週残り{cxw:.0f}%"
+              if cx5 >= 0 else "Codex 未連携")
+    else:
+        cx = "Codex 未連携"
     oauth = claude.get("oauth", {}) or {}
     if oauth.get("status") == "ok":
         def left(key: str) -> str:
@@ -369,11 +386,7 @@ def tray_tooltip(codex: dict, claude: dict) -> str:
         cl = f"Claude 5h残り{left('five_hour')} / 週残り{left('seven_day')}"
     else:
         cl = "Claude サブスク未取得"
-    return (
-        f"Codex 5h残り{cx5:.0f}% / 週残り{cxw:.0f}%\n{cl}"
-        if cx5 >= 0
-        else cl
-    )
+    return f"{cx}\n{cl}"
 
 
 class TrayController:
@@ -415,11 +428,14 @@ class TrayController:
 
     def update_from(self, codex: dict, claude: dict) -> None:
         self.tray.set_tooltip(tray_tooltip(codex, claude))
-        rl = codex.get("rate_limits", {}) or {}
-        try:
-            left = 100 - float((rl.get("primary", {}) or {}).get("used_percent") or 0)
-        except (TypeError, ValueError):
-            left = 100
+        if codex.get("has_rate"):
+            rl = codex.get("rate_limits", {}) or {}
+            try:
+                left = 100 - float((rl.get("primary", {}) or {}).get("used_percent") or 0)
+            except (TypeError, ValueError):
+                left = 100
+        else:
+            left = -1
         tray_icon_image(left).save(self._ico_path(), format="ICO", sizes=[(64, 64)])
         self.tray.set_icon(self._ico_path())
         self._check_alerts(codex, claude)
