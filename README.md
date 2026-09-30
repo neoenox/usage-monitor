@@ -1,6 +1,6 @@
 # usage-monitor
 
-Codex と Claude Code の使用量スナップショット (Windows / Python 3.11 / 依存ゼロ except GUI)。
+Codex と Claude Code の使用量スナップショット (Windows / Python 3.11)。GUIのトレイアイコンでは Pillow を使用します。
 
 ## セットアップ（1から連携させる場合）
 
@@ -17,7 +17,10 @@ npm install -g @anthropic-ai/claude-code
 claude auth login   # ブラウザ連携。資格情報は ~/.claude/.credentials.json に保存
 claude auth status  # {"loggedIn": true} を確認
 
-# 3. モニターは何も設定不要
+# 3. Python依存をインストール
+python -m pip install -r requirements.txt
+
+# 4. モニターを起動
 python monitor.py   # Codex: ローカル履歴 / Claude: ログイン資格情報で使用量APIを自動取得
 ```
 
@@ -53,6 +56,6 @@ python -m pytest tests -q
 ## exe化
 
 ```powershell
-pip install pyinstaller
+python -m pip install pyinstaller -r requirements.txt
 python -m PyInstaller --onefile --windowed --name usage-monitor --noconfirm gui.py
 ```
