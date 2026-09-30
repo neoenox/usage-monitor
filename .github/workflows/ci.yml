@@ -14,9 +14,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+          check-latest: true
           cache: pip
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt pytest
       - name: Run tests
-        run: python -m pytest tests -q
+        # Tcl/Tk keeps native standard handles across interpreter lifetimes.
+        # Preserve those handles while still capturing Python test output.
+        run: python -m pytest tests -q --capture=sys

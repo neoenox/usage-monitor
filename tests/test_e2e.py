@@ -26,30 +26,20 @@ def test_cli_json_e2e(fake_home, tmp_path):
     assert data["claude"]["oauth"]["status"] == "missing_token"
 
 
-def test_gui_render_e2e(fake_home, tmp_path, monkeypatch):
-    """実Tkウィンドウに描画しラベル/バー/グラフを検証。"""
-    import gui
+def test_gui_render_e2e(app, fake_home):
+    """実Tkウィンドウに描画しラベル/バー/グラフを検証 (共有ルート)。"""
     import history as h
-
-    monkeypatch.setattr(h, "db_path", lambda: tmp_path / "hist.db")
-    monkeypatch.setattr(gui.App, "refresh", lambda self: None)
-    h.record({"codex_5h": 50.0, "claude_5h": 10.0})
-
     import monitor as m
 
-    app = gui.App()
-    try:
-        app.withdraw()
-        codex = m.scan_codex(fake_home)
-        claude = m.scan_claude(fake_home)
-        app._render(codex, claude)
-        app.update_idletasks()
-        assert "残り" in app.lbl5.cget("text")
-        used = float(codex["rate_limits"]["primary"]["used_percent"])
-        assert float(app.bar5["value"]) == pytest.approx(100 - used)
-        assert len(app.chart.find_all()) > 0
-    finally:
-        app.destroy()
+    h.record({"codex_5h": 50.0, "claude_5h": 10.0})
+    codex = m.scan_codex(fake_home)
+    claude = m.scan_claude(fake_home)
+    app._render(codex, claude)
+    app.update_idletasks()
+    assert "残り" in app.lbl5.cget("text")
+    used = float(codex["rate_limits"]["primary"]["used_percent"])
+    assert float(app.bar5["value"]) == pytest.approx(100 - used)
+    assert len(app.chart.find_all()) > 0
 
 
 def test_tray_click_e2e():
@@ -79,6 +69,25 @@ def test_tray_click_e2e():
         tray.stop()
         th.join(timeout=5)
         assert not th.is_alive()
+
+
+def test_debug_log_rotation(tmp_path):
+    """tray-debug.logは上限行で切り詰められる。"""
+    import tray_win32
+
+    p = tmp_path / "tray-debug.log"
+    p.write_text("\n".join(f"line {i}" for i in range(500)) + "\n", encoding="utf-8")
+    # 64KB未満は触らない
+    tray_win32._rotate_debug_log(p)
+    assert len(p.read_text(encoding="utf-8").splitlines()) == 500
+    p.write_bytes(b"x" * (64 * 1024 + 10) + b"\nline\n")
+    tray_win32._rotate_debug_log(p)
+    assert len(p.read_text(encoding="utf-8", errors="ignore").splitlines()) <= 200
+
+    entries = [f"{i}: ログメッセージ " + "x" * 150 for i in range(500)]
+    p.write_text("\n".join(entries) + "\n", encoding="utf-8")
+    tray_win32._rotate_debug_log(p)
+    assert p.read_text(encoding="utf-8").splitlines() == entries[-200:]
 
 
 class _FakeTray:
@@ -124,41 +133,30 @@ def test_alert_integration_dedupe_and_rearm():
     assert len(fake.balloons) == 2  # 再武装後に再通知
 
 
-def test_gui_oauth_ok_and_stale_labels(tmp_path, monkeypatch):
-    """oauth正常系の描画＋stale注記の描画 (実Tk)。"""
-    import gui
-    import history as h
-    import monitor as m
-
-    monkeypatch.setattr(h, "db_path", lambda: tmp_path / "hist.db")
-    monkeypatch.setattr(gui.App, "refresh", lambda self: None)
-    app = gui.App()
-    try:
-        app.withdraw()
-        claude_ok = {"files": 1, "messages": 1, "input": 1, "output": 2,
-                     "cache_creation": 0, "cache_read": 0, "total": 3,
-                     "oauth": {"status": "ok",
-                               "five_hour": {"utilization": 20.0,
-                                             "resets_at": "2999-01-01T00:00:00+00:00"},
-                               "seven_day": {"utilization": 10.0,
-                                             "resets_at": "2999-01-08T00:00:00+00:00"},
-                               "seven_day_opus": {}, "seven_day_sonnet": {}}}
-        codex = {"files": 1, "sessions_with_tokens": 1, "input": 1, "output": 1,
-                 "cached": 0, "total": 2, "has_rate": True,
-                 "rate_limits": {
-                     "primary": {"used_percent": 10.0, "window_minutes": 300,
-                                 "resets_at": 2999999999},
-                     "secondary": {"used_percent": 20.0, "window_minutes": 10080,
-                                   "resets_at": 2999999999}},
-                 "context": {"input": 1, "window": 100, "pct": 1.0}}
-        app._render(codex, claude_ok)
-        app.update_idletasks()
-        assert "残り80%" in app.cl_lbl5.cget("text")
-        assert "セーフ" in app.cl_lbl5.cget("text")
-        # stale: リセット時刻が過去なら注記が出る
-        codex["rate_limits"]["primary"]["resets_at"] = 1000000000
-        app._render(codex, claude_ok)
-        app.update_idletasks()
-        assert "新データ待ち" in app.lbl5.cget("text")
-    finally:
-        app.destroy()
+def test_gui_oauth_ok_and_stale_labels(app):
+    """oauth正常系の描画＋stale注記の描画 (共有ルート)。"""
+    claude_ok = {"files": 1, "messages": 1, "input": 1, "output": 2,
+                 "cache_creation": 0, "cache_read": 0, "total": 3,
+                 "oauth": {"status": "ok",
+                           "five_hour": {"utilization": 20.0,
+                                         "resets_at": "2999-01-01T00:00:00+00:00"},
+                           "seven_day": {"utilization": 10.0,
+                                         "resets_at": "2999-01-08T00:00:00+00:00"},
+                           "seven_day_opus": {}, "seven_day_sonnet": {}}}
+    codex = {"files": 1, "sessions_with_tokens": 1, "input": 1, "output": 1,
+             "cached": 0, "total": 2, "has_rate": True,
+             "rate_limits": {
+                 "primary": {"used_percent": 10.0, "window_minutes": 300,
+                             "resets_at": 2999999999},
+                 "secondary": {"used_percent": 20.0, "window_minutes": 10080,
+                               "resets_at": 2999999999}},
+             "context": {"input": 1, "window": 100, "pct": 1.0}}
+    app._render(codex, claude_ok)
+    app.update_idletasks()
+    assert "残り80%" in app.cl_lbl5.cget("text")
+    assert "セーフ" in app.cl_lbl5.cget("text")
+    # stale: リセット時刻が過去なら注記が出る
+    codex["rate_limits"]["primary"]["resets_at"] = 1000000000
+    app._render(codex, claude_ok)
+    app.update_idletasks()
+    assert "新データ待ち" in app.lbl5.cget("text")

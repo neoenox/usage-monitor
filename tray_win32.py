@@ -14,14 +14,30 @@ from ctypes import wintypes
 from pathlib import Path
 
 
+DEBUG_LOG_MAX_LINES = 200
+
+
 def _debug(msg: str) -> None:
     try:
         d = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "usage-monitor"
         d.mkdir(parents=True, exist_ok=True)
-        with open(d / "tray-debug.log", "a", encoding="utf-8") as f:
+        p = d / "tray-debug.log"
+        with open(p, "a", encoding="utf-8") as f:
             import datetime
 
             f.write(f"{datetime.datetime.now():%H:%M:%S} {msg}\n")
+        _rotate_debug_log(p)
+    except Exception:
+        pass
+
+
+def _rotate_debug_log(p: Path, keep: int = DEBUG_LOG_MAX_LINES) -> None:
+    """末尾keep行だけ残して切り詰め (常駐で無限肥大させない)。"""
+    try:
+        if p.stat().st_size < 64 * 1024:
+            return
+        lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+        p.write_text("\n".join(lines[-keep:]) + "\n", encoding="utf-8")
     except Exception:
         pass
 
