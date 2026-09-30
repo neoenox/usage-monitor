@@ -44,9 +44,13 @@ def test_project_hit_history_slope():
 
 
 def test_pace_label():
+    import re as _re
+
     assert m.pace_label(0, 300, None) == "このペースならセーフ"
     lbl = m.pace_label(90.0, 300, int(time.time()) + 3600)
     assert "枯渇" in lbl
+    lbl_nodate = m.pace_label(90.0, 300, int(time.time()) + 3600, (), False)
+    assert _re.fullmatch(r"このままだと\d{2}:\d{2}頃枯渇", lbl_nodate), lbl_nodate
 
 
 def test_week_pace():

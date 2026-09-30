@@ -95,11 +95,13 @@ def project_hit(used: float | None, window_min: int, reset_epoch: int | None,
 
 
 def pace_label(used: float | None, window_min: int, reset_epoch: int | None,
-               hist: list[tuple[int, float]] | tuple = ()) -> str:
+               hist: list[tuple[int, float]] | tuple = (),
+               show_date: bool = True) -> str:
     hit = project_hit(used, window_min, reset_epoch, hist)
     if hit is None:
         return "このペースならセーフ"
-    return f"このままだと{fmt_ts(hit)}頃枯渇"
+    when = fmt_ts(hit) if show_date else datetime.fromtimestamp(hit).astimezone().strftime("%H:%M")
+    return f"このままだと{when}頃枯渇"
 
 
 def week_pace(used: float | None, window_min: int, reset_epoch: int | None) -> str:
@@ -528,7 +530,7 @@ def main() -> int:
             h5, hw = [], []
         print(f"  5h      : {100 - p_used:.0f}% left (used {p_used:.0f}%) "
               f"reset={fmt_ts(pri.get('resets_at'))} ({fmt_countdown(pri.get('resets_at'))}) "
-              f"[{pace_label(p_used, 300, pri.get('resets_at'), h5)}]")
+              f"[{pace_label(p_used, 300, pri.get('resets_at'), h5, False)}]")
         print(f"  weekly  : {100 - s_used:.0f}% left (used {s_used:.0f}%) "
               f"reset={fmt_ts(sec.get('resets_at'))} ({fmt_countdown(sec.get('resets_at'))}) "
               f"[{pace_label(s_used, 10080, sec.get('resets_at'), hw)}] "
@@ -563,7 +565,8 @@ def main() -> int:
             try:
                 left = 100 - float(u)
                 pace = pace_label(float(u), win_min.get(key, 0),
-                                  iso_to_epoch(w.get("resets_at")), hist_of.get(key, []))
+                                  iso_to_epoch(w.get("resets_at")), hist_of.get(key, []),
+                                  show_date=(key != "five_hour"))
                 extra = ""
                 if key == "seven_day":
                     extra = f" <{week_pace(float(u), 10080, iso_to_epoch(w.get('resets_at')))}>"
@@ -583,3 +586,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

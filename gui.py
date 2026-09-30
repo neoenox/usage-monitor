@@ -161,7 +161,7 @@ class App(tk.Tk):
             self.bar5["value"] = 100 - p_used
             self.lbl5.config(text=self._codex_label(
                 "5h", p_used, pri.get("resets_at"), m.fmt_ts,
-                m.pace_label(p_used, 300, pri.get("resets_at"), h.recent("codex_5h"))))
+                m.pace_label(p_used, 300, pri.get("resets_at"), h.recent("codex_5h"), False)))
             self.barW["value"] = 100 - s_used
             self.lblW.config(text=self._codex_label(
                 "週", s_used, sec.get("resets_at"), m.fmt_ts,
@@ -200,7 +200,7 @@ class App(tk.Tk):
                 win_min = 300 if key == "five_hour" else 10080
                 hist_key = "claude_5h" if key == "five_hour" else "claude_wk"
                 pace = m.pace_label(used, win_min, m.iso_to_epoch(w.get("resets_at")),
-                                    h.recent(hist_key))
+                                    h.recent(hist_key), show_date=(key != "five_hour"))
                 extra = (f" <{m.week_pace(used, 10080, m.iso_to_epoch(w.get('resets_at')))}>"
                          if key == "seven_day" else "")
                 lbl.config(text=f"{tag} 残り{100 - used:.0f}% (使用{used:.0f}%) "
@@ -289,7 +289,7 @@ class App(tk.Tk):
             pu, su = float(pri.get("used_percent") or 0), float(sec.get("used_percent") or 0)
             self.lbl5.config(text=self._codex_label(
                 "5h", pu, pri.get("resets_at"), m.fmt_ts,
-                m.pace_label(pu, 300, pri.get("resets_at"), h.recent("codex_5h"))))
+                m.pace_label(pu, 300, pri.get("resets_at"), h.recent("codex_5h"), False)))
             self.lblW.config(text=self._codex_label(
                 "週", su, sec.get("resets_at"), m.fmt_ts,
                 m.pace_label(su, 10080, sec.get("resets_at"), h.recent("codex_wk"))
@@ -305,7 +305,7 @@ class App(tk.Tk):
                 try:
                     used = float(w.get("utilization"))
                     pace = m.pace_label(used, win_min, m.iso_to_epoch(w.get("resets_at")),
-                                        h.recent(hist_key))
+                                        h.recent(hist_key), show_date=(key != "five_hour"))
                     extra = (f" <{m.week_pace(used, 10080, m.iso_to_epoch(w.get('resets_at')))}>"
                              if key == "seven_day" else "")
                     lbl.config(text=f"{tag} 残り{100 - used:.0f}% (使用{used:.0f}%) "
