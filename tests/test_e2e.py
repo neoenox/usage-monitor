@@ -94,6 +94,11 @@ def test_debug_log_rotation(tmp_path):
     tray_win32._rotate_debug_log(p)
     assert len(p.read_text(encoding="utf-8", errors="ignore").splitlines()) <= 200
 
+    entries = [f"{i}: ログメッセージ " + "x" * 150 for i in range(500)]
+    p.write_text("\n".join(entries) + "\n", encoding="utf-8")
+    tray_win32._rotate_debug_log(p)
+    assert p.read_text(encoding="utf-8").splitlines() == entries[-200:]
+
 
 class _FakeTray:
     def __init__(self):
