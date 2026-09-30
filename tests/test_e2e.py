@@ -79,3 +79,86 @@ def test_tray_click_e2e():
         tray.stop()
         th.join(timeout=5)
         assert not th.is_alive()
+
+
+class _FakeTray:
+    def __init__(self):
+        self.balloons: list[tuple[str, str, bool]] = []
+
+    def set_tooltip(self, text):
+        pass
+
+    def set_icon(self, path):
+        pass
+
+    def balloon(self, title, msg, warn=False):
+        self.balloons.append((title, msg, warn))
+
+
+def _low_codex():
+    return {"has_rate": True, "rate_limits": {
+        "primary": {"used_percent": 95.0, "window_minutes": 300, "resets_at": 1999999999},
+        "secondary": {"used_percent": 10.0, "window_minutes": 10080, "resets_at": 1999999999}}}
+
+
+def test_alert_integration_dedupe_and_rearm():
+    """残量低下→バルーン1発・重複なし・回復で再武装 (Tk不要)。"""
+    import gui
+
+    ctl = gui.TrayController.__new__(gui.TrayController)
+    ctl.notified = {}
+    fake = _FakeTray()
+    ctl.tray = fake
+    claude = {"oauth": {"status": "missing_token"}}
+    ctl._check_alerts(_low_codex(), claude)
+    assert len(fake.balloons) == 1
+    assert "要節約" in fake.balloons[0][0] and "Codex 5h" in fake.balloons[0][1]
+    ctl._check_alerts(_low_codex(), claude)
+    assert len(fake.balloons) == 1  # 同一閾値で再通知しない
+    healthy = {"has_rate": True, "rate_limits": {
+        "primary": {"used_percent": 50.0, "window_minutes": 300, "resets_at": 1999999999},
+        "secondary": {"used_percent": 10.0, "window_minutes": 10080, "resets_at": 1999999999}}}
+    ctl._check_alerts(healthy, claude)
+    assert ctl.notified.get("Codex 5h") is None  # 25%超でリセット
+    ctl._check_alerts(_low_codex(), claude)
+    assert len(fake.balloons) == 2  # 再武装後に再通知
+
+
+def test_gui_oauth_ok_and_stale_labels(tmp_path, monkeypatch):
+    """oauth正常系の描画＋stale注記の描画 (実Tk)。"""
+    import gui
+    import history as h
+    import monitor as m
+
+    monkeypatch.setattr(h, "db_path", lambda: tmp_path / "hist.db")
+    monkeypatch.setattr(gui.App, "refresh", lambda self: None)
+    app = gui.App()
+    try:
+        app.withdraw()
+        claude_ok = {"files": 1, "messages": 1, "input": 1, "output": 2,
+                     "cache_creation": 0, "cache_read": 0, "total": 3,
+                     "oauth": {"status": "ok",
+                               "five_hour": {"utilization": 20.0,
+                                             "resets_at": "2999-01-01T00:00:00+00:00"},
+                               "seven_day": {"utilization": 10.0,
+                                             "resets_at": "2999-01-08T00:00:00+00:00"},
+                               "seven_day_opus": {}, "seven_day_sonnet": {}}}
+        codex = {"files": 1, "sessions_with_tokens": 1, "input": 1, "output": 1,
+                 "cached": 0, "total": 2, "has_rate": True,
+                 "rate_limits": {
+                     "primary": {"used_percent": 10.0, "window_minutes": 300,
+                                 "resets_at": 2999999999},
+                     "secondary": {"used_percent": 20.0, "window_minutes": 10080,
+                                   "resets_at": 2999999999}},
+                 "context": {"input": 1, "window": 100, "pct": 1.0}}
+        app._render(codex, claude_ok)
+        app.update_idletasks()
+        assert "残り80%" in app.cl_lbl5.cget("text")
+        assert "セーフ" in app.cl_lbl5.cget("text")
+        # stale: リセット時刻が過去なら注記が出る
+        codex["rate_limits"]["primary"]["resets_at"] = 1000000000
+        app._render(codex, claude_ok)
+        app.update_idletasks()
+        assert "新データ待ち" in app.lbl5.cget("text")
+    finally:
+        app.destroy()
