@@ -298,6 +298,11 @@ def claude_token(home: Path) -> str:
         except Exception:
             pass
         break
+    try:
+        if home.resolve() != Path.home().resolve():
+            return ""
+    except OSError:
+        return ""
     return claude_token_from_os_store()
 
 
@@ -370,11 +375,13 @@ def _cli_refresh_creds(home: Path) -> bool:
     except Exception:
         pass
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["claude", "-p", "ping", "--output-format", "text"],
             capture_output=True, timeout=120,
             cwd=str(home),
         )
+        if result.returncode != 0:
+            return False
         try:
             mark.parent.mkdir(parents=True, exist_ok=True)
             mark.write_text("1", encoding="utf-8")
