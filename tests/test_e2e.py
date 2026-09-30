@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import requires_tk
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -26,6 +28,7 @@ def test_cli_json_e2e(fake_home, tmp_path):
     assert data["claude"]["oauth"]["status"] == "missing_token"
 
 
+@requires_tk
 def test_gui_render_e2e(fake_home, tmp_path, monkeypatch):
     """実Tkウィンドウに描画しラベル/バー/グラフを検証。"""
     import gui
@@ -138,6 +141,7 @@ def test_alert_integration_dedupe_and_rearm():
     assert len(fake.balloons) == 2  # 再武装後に再通知
 
 
+@requires_tk
 def test_gui_oauth_ok_and_stale_labels(tmp_path, monkeypatch):
     """oauth正常系の描画＋stale注記の描画 (実Tk)。"""
     import gui

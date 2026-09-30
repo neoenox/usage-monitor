@@ -13,6 +13,23 @@ sys.path.insert(0, str(ROOT))
 import monitor as m  # noqa: E402
 
 
+def _tk_available() -> bool:
+    try:
+        import tkinter as tk
+
+        r = tk.Tk()
+        r.withdraw()
+        r.update()
+        r.destroy()
+        return True
+    except Exception:
+        return False
+
+
+TK_AVAILABLE = _tk_available()
+requires_tk = pytest.mark.skipif(not TK_AVAILABLE, reason="tk unavailable on this runner")
+
+
 def _codex_event(ts: str, used_p: float, used_s: float, inp: int, out: int,
                  resets_p: int = 1790654471, resets_s: int = 1791070697) -> str:
     return json.dumps({
