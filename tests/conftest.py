@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -32,6 +33,8 @@ def app(tmp_path_factory):
     except Exception:
         h.db_path = orig_db
         gui.App.refresh = orig_refresh
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            raise
         pytest.skip("tk unavailable on this runner")
     a.withdraw()
     yield a
