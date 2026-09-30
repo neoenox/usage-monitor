@@ -130,7 +130,6 @@ def test_expired_status(tmp_path, monkeypatch):
     assert out["status"] == "expired"
     assert m.claude_has_creds(tmp_path) is True
 
-
 def test_unlinked_home(tmp_path):
     """空HOME: has_rate False・tooltipは未連携表示。"""
     import gui
@@ -139,3 +138,38 @@ def test_unlinked_home(tmp_path):
     assert codex["files"] == 0 and codex["has_rate"] is False
     tip = gui.tray_tooltip(codex, {"oauth": {"status": "missing_token"}})
     assert "Codex 未連携" in tip
+
+
+def test_custom_home_does_not_use_real_credentials_or_network(tmp_path, monkeypatch):
+    """A synthetic HOME must stay isolated from this machine's auth state."""
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "real-machine-token")
+
+    def unexpected_os_store():
+        raise AssertionError("OS credential store must not be read for a custom HOME")
+
+    def unexpected_network(*args, **kwargs):
+        raise AssertionError("live usage API must not be called for a custom HOME")
+
+    monkeypatch.setattr(m, "claude_token_from_os_store", unexpected_os_store)
+    monkeypatch.setattr(urllib.request, "urlopen", unexpected_network)
+
+    out = m.scan_claude(tmp_path)
+    assert out["oauth"]["status"] == "missing_token"
+
+
+def test_cli_refresh_failure_does_not_start_cooldown(tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+    from types import SimpleNamespace
+
+    local = tmp_path / "local"
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    monkeypatch.setattr(shutil, "which", lambda name: "claude.exe")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=1),
+    )
+
+    assert m._cli_refresh_creds(tmp_path) is False
+    assert not (local / "usage-monitor" / ".cli_refresh").exists()
