@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -23,6 +24,8 @@ def _tk_available() -> bool:
         r.destroy()
         return True
     except Exception:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            raise
         return False
 
 
