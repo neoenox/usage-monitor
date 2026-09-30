@@ -383,18 +383,62 @@ class App(tk.Tk):
         self.btn_auto.config(text=f"自動起動:{'ON' if autostart_enabled() else 'OFF'}")
 
 
-def tray_icon_image(pct_left: float):
-    """残量%に応じた色丸アイコン (緑/黄/赤・負値は未連携グレー)。"""
+def _ring_color(left: float | None) -> str:
+    if left is None:
+        return "#9ca3af"
+    v = max(0.0, min(100.0, left))
+    return "#22c55e" if v >= 50 else ("#f59e0b" if v >= 20 else "#ef4444")
+
+
+def _nearest_left(windows: list[tuple[float | None, int | None]]) -> float | None:
+    """リセット最短の窓の残量%を返す。候補がなければNone (グレー表示)。"""
+    dated = sorted((r, left) for left, r in windows if r and left is not None)
+    if dated:
+        return dated[0][1]
+    valid = [left for left, _ in windows if left is not None]
+    return valid[0] if valid else None
+
+
+def tray_icon_image(codex: dict, claude: dict | None = None):
+    """二重円: 外=Codex・内=Claude。各々リセット最短の窓の残量を弧で表示。"""
     from PIL import Image, ImageDraw
 
-    if pct_left is None or pct_left < 0:
-        color = "#9ca3af"
-    else:
-        v = max(0.0, min(100.0, float(pct_left)))
-        color = "#22c55e" if v >= 50 else ("#f59e0b" if v >= 20 else "#ef4444")
+    if isinstance(codex, (int, float)):  # 旧呼出互換 (単一%→外円のみ)
+        codex = {"rate_limits": {"primary": {"used_percent": 100 - float(codex)}}}
+        claude = None
+    rl = codex.get("rate_limits", {}) or {}
+    cx_windows = []
+    for key in ("primary", "secondary"):
+        w = rl.get(key, {}) or {}
+        try:
+            left = 100 - float(w.get("used_percent"))
+        except (TypeError, ValueError):
+            left = None
+        cx_windows.append((left, w.get("resets_at")))
+    cx_left = _nearest_left(cx_windows) if codex.get("has_rate", True) else None
+
+    cl_left = None
+    oauth = (claude or {}).get("oauth", {}) or {}
+    if oauth.get("status") == "ok":
+        cl_windows = []
+        for key in ("five_hour", "seven_day"):
+            w = oauth.get(key, {}) or {}
+            try:
+                left = 100 - float(w.get("utilization"))
+            except (TypeError, ValueError):
+                left = None
+            cl_windows.append((left, m.iso_to_epoch(w.get("resets_at"))))
+        cl_left = _nearest_left(cl_windows)
+
     img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.ellipse([6, 6, 58, 58], fill=color)
+    for bbox, width, left in (([4, 4, 60, 60], 7, cx_left),
+                              ([17, 17, 47, 47], 7, cl_left)):
+        d.arc(bbox, 0, 360, fill="#374151", width=width)
+        if left is not None:
+            sweep = max(0.0, min(100.0, left)) / 100 * 360
+            if sweep > 0:
+                d.arc(bbox, -90, -90 + sweep, fill=_ring_color(left), width=width)
     return img
 
 
@@ -468,15 +512,7 @@ class TrayController:
 
     def update_from(self, codex: dict, claude: dict) -> None:
         self.tray.set_tooltip(tray_tooltip(codex, claude))
-        if codex.get("has_rate"):
-            rl = codex.get("rate_limits", {}) or {}
-            try:
-                left = 100 - float((rl.get("primary", {}) or {}).get("used_percent") or 0)
-            except (TypeError, ValueError):
-                left = 100
-        else:
-            left = -1
-        tray_icon_image(left).save(self._ico_path(), format="ICO", sizes=[(64, 64)])
+        tray_icon_image(codex, claude).save(self._ico_path(), format="ICO", sizes=[(64, 64)])
         self.tray.set_icon(self._ico_path())
         self._check_alerts(codex, claude)
 
