@@ -38,10 +38,16 @@ def set_autostart(on: bool) -> bool:
     try:
         if on:
             tgt = autostart_target()
+            target = str(tgt[0]).replace("'", "''")
+            arguments = subprocess.list2cmdline(tgt[1:]).replace("'", "''")
+            working_dir = (
+                Path(tgt[1]).parent if len(tgt) > 2 else Path(tgt[0]).parent
+            )
+            working = str(working_dir).replace("'", "''")
             ps = (
                 f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}');"
-                f"$s.TargetPath='{tgt[0]}';$s.Arguments='{tgt[1]}';$s.WorkingDirectory="
-                f"'{Path(tgt[0]).parent}';$s.Save()"
+                f"$s.TargetPath='{target}';$s.Arguments='{arguments}';"
+                f"$s.WorkingDirectory='{working}';$s.Save()"
             )
             subprocess.run(["powershell", "-NoProfile", "-Command", ps], check=True,
                            capture_output=True, timeout=30)
@@ -58,6 +64,7 @@ class App(tk.Tk):
         self.title("Usage Monitor - codex + claude")
         self.geometry("560x920")
         self._build()
+        self._tick_job: str | None = None
         self.refresh()
 
     def _build(self) -> None:
@@ -231,7 +238,7 @@ class App(tk.Tk):
         self.status.config(text=f"更新: {datetime.now().strftime('%H:%M:%S')}")
         if getattr(self, "tray", None):
             self.tray.update_from(codex, claude)
-        self.after(60 * 1000, self._tick)
+        self._schedule_tick()
 
     @staticmethod
     def _codex_label(tag: str, used: float, resets_at, fmter, pace: str = "") -> str:
@@ -251,9 +258,19 @@ class App(tk.Tk):
                 continue
         return " / ".join(parts)
 
+    def _schedule_tick(self) -> None:
+        if self._tick_job is not None:
+            try:
+                self.after_cancel(self._tick_job)
+            except tk.TclError:
+                pass
+        self._tick_job = self.after(60 * 1000, self._tick)
+
     def _tick(self) -> None:
         """1分毎にcountdown・ペース部分だけ更新。"""
+        self._tick_job = None
         if not hasattr(self, "_last"):
+            self._schedule_tick()
             return
         codex, claude = self._last
         rl = codex.get("rate_limits", {}) or {}
@@ -286,7 +303,7 @@ class App(tk.Tk):
                                     f"reset={m.fmt_ts_iso(w.get('resets_at'))} ({m.fmt_countdown(w.get('resets_at'))}) [{pace}]{extra}")
                 except (TypeError, ValueError):
                     pass
-        self.after(60 * 1000, self._tick)
+        self._schedule_tick()
 
     def _draw_chart(self) -> None:
         from datetime import datetime
