@@ -28,7 +28,6 @@ BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 def fmt_num(n: int) -> str:
     return f"{n:,}"
 
-
 def iso_to_epoch(s: str | None) -> int | None:
     if not s:
         return None
@@ -36,6 +35,18 @@ def iso_to_epoch(s: str | None) -> int | None:
         return int(datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp())
     except Exception:
         return None
+
+
+def is_stale(reset) -> bool:
+    """リセット時刻を過ぎていたら前窓の古い値として扱う。"""
+    import time
+
+    if isinstance(reset, str):
+        reset = iso_to_epoch(reset)
+    try:
+        return bool(reset) and int(float(reset)) < time.time()
+    except (TypeError, ValueError):
+        return False
 
 
 def fmt_countdown(target) -> str:
@@ -180,40 +191,62 @@ def scan_codex(home: Path) -> dict:
             total_in += int(last_usage.get("input_tokens") or 0)
             total_out += int(last_usage.get("output_tokens") or 0)
             total_cached += int(last_usage.get("cached_input_tokens") or 0)
-    # mtime降順で最初にtoken_countを持つファイルの最終イベントからrate_limits取得
+    # レート制限は「全ファイル中の最新token_countイベント」を採用。
+    # mtime順では複数セッションが交互追記されると古い値を掴むため、
+    # イベントtimestamp(ISO)の最大で選ぶ。primaryがdictでない行は除外。
     latest_rl = None
+    latest_rl_ts = ""
     latest_rl_file = ""
-    context: dict = {}
-    for f in sorted(files, key=lambda x: x.stat().st_mtime, reverse=True):
+    for f in files:
         try:
             with open(f, encoding="utf-8", errors="ignore") as fh:
                 for line in fh:
-                    if "token_count" not in line and "rate_limits" not in line:
+                    if "rate_limits" not in line:
                         continue
                     try:
                         d = json.loads(line)
                     except Exception:
                         continue
                     payload = d.get("payload", {}) if isinstance(d, dict) else {}
-                    if "rate_limits" in line:
-                        rl = payload.get("rate_limits", {})
-                        if isinstance(rl, dict) and "primary" in rl:
-                            latest_rl = rl
-                    if "token_count" in line:
-                        info = payload.get("info", {}) if isinstance(payload, dict) else {}
-                        last = info.get("last_token_usage") or {}
-                        win = info.get("model_context_window") or 0
-                        try:
-                            ctx_in = int(last.get("input_tokens") or 0)
-                            win = int(win)
-                        except (TypeError, ValueError, AttributeError):
-                            continue
-                        if win > 0:
-                            context = {"input": ctx_in, "window": win,
-                                       "pct": round(ctx_in / win * 100, 1)}
-            if latest_rl is not None:
-                latest_rl_file = f.name
-                break
+                    rl = payload.get("rate_limits") if isinstance(payload, dict) else None
+                    if not isinstance(rl, dict) or not isinstance(rl.get("primary"), dict):
+                        continue
+                    ts = str(d.get("timestamp", ""))
+                    if ts >= latest_rl_ts:
+                        latest_rl_ts = ts
+                        latest_rl = rl
+                        latest_rl_file = f.name
+        except Exception:
+            continue
+    # contextも全ファイル中の最新token_countイベントから取得
+    context: dict = {}
+    latest_ctx_ts = ""
+    for f in files:
+        try:
+            with open(f, encoding="utf-8", errors="ignore") as fh:
+                for line in fh:
+                    if "token_count" not in line:
+                        continue
+                    try:
+                        d = json.loads(line)
+                    except Exception:
+                        continue
+                    ts = str(d.get("timestamp", ""))
+                    if ts < latest_ctx_ts:
+                        continue
+                    payload = d.get("payload", {}) if isinstance(d, dict) else {}
+                    info = payload.get("info", {}) if isinstance(payload, dict) else {}
+                    last = info.get("last_token_usage") or {}
+                    win = info.get("model_context_window") or 0
+                    try:
+                        ctx_in = int(last.get("input_tokens") or 0)
+                        win = int(win)
+                    except (TypeError, ValueError, AttributeError):
+                        continue
+                    if win > 0:
+                        latest_ctx_ts = ts
+                        context = {"input": ctx_in, "window": win,
+                                   "pct": round(ctx_in / win * 100, 1)}
         except Exception:
             continue
     return {
@@ -530,7 +563,8 @@ def main() -> int:
             h5, hw = [], []
         print(f"  5h      : {100 - p_used:.0f}% left (used {p_used:.0f}%) "
               f"reset={fmt_ts(pri.get('resets_at'))} ({fmt_countdown(pri.get('resets_at'))}) "
-              f"[{pace_label(p_used, 300, pri.get('resets_at'), h5, False)}]")
+              f"[{pace_label(p_used, 300, pri.get('resets_at'), h5, False)}]"
+              f"{' [stale]' if is_stale(pri.get('resets_at')) else ''}")
         print(f"  weekly  : {100 - s_used:.0f}% left (used {s_used:.0f}%) "
               f"reset={fmt_ts(sec.get('resets_at'))} ({fmt_countdown(sec.get('resets_at'))}) "
               f"[{pace_label(s_used, 10080, sec.get('resets_at'), hw)}] "

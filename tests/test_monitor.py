@@ -144,6 +144,41 @@ def test_unlinked_home(tmp_path):
     assert "Codex 未連携" in tip
 
 
+def test_newest_event_wins_over_mtime(tmp_path):
+    """交互追記される複数セッションでも最新イベントを採用 (回帰)。"""
+    import json as _json
+    import os as _os
+
+    def ev(ts, p, s):
+        return _json.dumps({"timestamp": ts, "type": "event_msg", "payload": {
+            "type": "token_count",
+            "info": {"total_token_usage": {"input_tokens": 1, "output_tokens": 1,
+                                           "cached_input_tokens": 0}},
+            "rate_limits": {"limit_id": "codex", "plan_type": "plus",
+                            "primary": {"used_percent": p, "window_minutes": 300,
+                                        "resets_at": 1790763214},
+                            "secondary": {"used_percent": s, "window_minutes": 10080,
+                                          "resets_at": 1791070697}}}})
+    d = tmp_path / ".codex" / "sessions"
+    d.mkdir(parents=True)
+    old = d / "old-mtime.jsonl"  # mtimeは古いがイベントは新しい
+    new = d / "new-mtime.jsonl"  # mtimeは新しいがイベントは古い
+    old.write_text(ev("2026-09-30T06:17:00.000Z", 99.0, 54.0) + "\n", encoding="utf-8")
+    new.write_text(ev("2026-09-29T10:00:00.000Z", 0.0, 3.0) + "\n", encoding="utf-8")
+    _os.utime(new, (1790720000, 1790720000))  # mtimeを新しく偽装
+    out = m.scan_codex(tmp_path)
+    assert out["rate_limits"]["primary"]["used_percent"] == 99.0
+    assert out["rate_limits"]["secondary"]["used_percent"] == 54.0
+
+
+def test_is_stale():
+    import time as _time
+
+    assert m.is_stale(int(_time.time()) - 10) is True
+    assert m.is_stale(int(_time.time()) + 3600) is False
+    assert m.is_stale(None) is False
+
+
 def test_custom_home_does_not_use_real_credentials_or_network(tmp_path, monkeypatch):
     """A synthetic HOME must stay isolated from this machine's auth state."""
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "real-machine-token")

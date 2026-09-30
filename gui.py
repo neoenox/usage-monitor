@@ -250,7 +250,11 @@ class App(tk.Tk):
     def _codex_label(tag: str, used: float, resets_at, fmter, pace: str = "") -> str:
         base = (f"{tag} 残り{100 - used:.0f}% (使用{used:.0f}%) "
                 f"reset={fmter(resets_at)} ({m.fmt_countdown(resets_at)})")
-        return f"{base} [{pace}]" if pace else base
+        if pace:
+            base += f" [{pace}]"
+        if m.is_stale(resets_at):
+            base += "（窓終了・新データ待ち）"
+        return base
 
     @staticmethod
     def _models_label(oauth: dict) -> str:
