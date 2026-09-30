@@ -13,21 +13,34 @@ sys.path.insert(0, str(ROOT))
 import monitor as m  # noqa: E402
 
 
-def _tk_available() -> bool:
+@pytest.fixture(scope="module")
+def app(tmp_path_factory):
+    """GUIテスト共有の単一Tkルート (複数ルートはWindowsで不安定なため)。
+    Tkを作れない環境(CI等)ではスキップ。"""
+    import tempfile
+
+    import gui
+    import history as h
+
+    tmp = Path(tempfile.mkdtemp(prefix="usage-mon-test-"))
+    orig_db = h.db_path
+    orig_refresh = gui.App.refresh
+    h.db_path = lambda: tmp / "hist.db"  # noqa: E731
+    gui.App.refresh = lambda self: None  # noqa: E731
     try:
-        import tkinter as tk
-
-        r = tk.Tk()
-        r.withdraw()
-        r.update()
-        r.destroy()
-        return True
+        a = gui.App()
     except Exception:
-        return False
-
-
-TK_AVAILABLE = _tk_available()
-requires_tk = pytest.mark.skipif(not TK_AVAILABLE, reason="tk unavailable on this runner")
+        h.db_path = orig_db
+        gui.App.refresh = orig_refresh
+        pytest.skip("tk unavailable on this runner")
+    a.withdraw()
+    yield a
+    try:
+        a.destroy()
+    except Exception:
+        pass
+    h.db_path = orig_db
+    gui.App.refresh = orig_refresh
 
 
 def _codex_event(ts: str, used_p: float, used_s: float, inp: int, out: int,
