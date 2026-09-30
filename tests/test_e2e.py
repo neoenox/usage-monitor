@@ -45,7 +45,8 @@ def test_gui_render_e2e(fake_home, tmp_path, monkeypatch):
         app._render(codex, claude)
         app.update_idletasks()
         assert "残り" in app.lbl5.cget("text")
-        assert float(app.bar5["value"]) == pytest.approx(100 - 50.0) or True
+        used = float(codex["rate_limits"]["primary"]["used_percent"])
+        assert float(app.bar5["value"]) == pytest.approx(100 - used)
         assert len(app.chart.find_all()) > 0
     finally:
         app.destroy()
