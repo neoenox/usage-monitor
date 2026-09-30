@@ -63,9 +63,28 @@ class App(tk.Tk):
         super().__init__()
         self.title("Usage Monitor - codex + claude")
         self.geometry("560x920")
-        self._build()
         self._tick_job: str | None = None
+        self._set_window_icon()
+        self._build()
         self.refresh()
+
+    def _set_window_icon(self) -> None:
+        """タイトルバー左上のアイコン (exe埋め込みとは別に必要)。"""
+        try:
+            from PIL import Image, ImageDraw
+
+            S = 64
+            img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            d.rounded_rectangle([2, 2, S - 2, S - 2], radius=13, fill=(17, 24, 39, 255))
+            d.arc([11, 11, S - 11, S - 11], start=-90, end=180, fill=(34, 197, 94, 255), width=7)
+            d.arc([11, 11, S - 11, S - 11], start=180, end=270, fill=(55, 65, 81, 255), width=7)
+            d.ellipse([S // 2 - 6, S // 2 - 6, S // 2 + 6, S // 2 + 6], fill=(59, 130, 246, 255))
+            p = h.db_path().parent / "window.ico"
+            img.save(str(p), format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (64, 64)])
+            self.iconbitmap(str(p))
+        except Exception:
+            pass
 
     def _build(self) -> None:
         root = ttk.Frame(self, padding=12)
