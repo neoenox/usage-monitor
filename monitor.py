@@ -227,6 +227,14 @@ def scan_codex(home: Path) -> dict:
     }
 
 
+def _same_home(home: Path) -> bool:
+    """Return True only when *home* is the process user's real home."""
+    try:
+        return home.expanduser().resolve() == Path.home().expanduser().resolve()
+    except (OSError, RuntimeError):
+        return False
+
+
 def scan_claude(home: Path) -> dict:
     base = home / ".claude" / "projects"
     files = sorted(base.rglob("*.jsonl")) if base.exists() else []
@@ -252,7 +260,9 @@ def scan_claude(home: Path) -> dict:
                     cache_r += int(u.get("cache_read_input_tokens") or 0)
         except Exception:
             continue
-    oauth = fetch_claude_oauth(home)
+    # A caller that supplies another HOME is asking for an isolated scan.
+    # Do not fall through to this machine's env token or OS credential store.
+    oauth = fetch_claude_oauth(home, isolated=not _same_home(home))
     return {
         "files": len(files),
         "messages": msgs,
@@ -265,7 +275,7 @@ def scan_claude(home: Path) -> dict:
     }
 
 
-def claude_token(home: Path) -> str:
+def claude_token(home: Path, *, isolated: bool = False) -> str:
     """Resolve Claude OAuth access token (memory only, never persisted).
 
     Order: env CLAUDE_CODE_OAUTH_TOKEN / ~/.claude_oauth_token file /
@@ -273,9 +283,10 @@ def claude_token(home: Path) -> str:
     OS credential store entry (with refresh when expired).
     期限切れ時は公式CLIに再取得させる (30分クールダウン)。
     """
-    tok = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
-    if tok:
-        return tok
+    if not isolated:
+        tok = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
+        if tok:
+            return tok
     try:
         p = home / ".claude_oauth_token"
         if p.exists():
@@ -298,16 +309,19 @@ def claude_token(home: Path) -> str:
         except Exception:
             pass
         break
-    return claude_token_from_os_store()
+    return "" if isolated else claude_token_from_os_store()
 
 
-def claude_has_creds(home: Path) -> bool:
+def claude_has_creds(home: Path, *, isolated: bool = False) -> bool:
     try:
         if (home / ".claude" / ".credentials.json").exists():
             return True
     except Exception:
         pass
-    return bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip())
+    return (
+        not isolated
+        and bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip())
+    )
 
 
 def _resolve_oauth_access(oauth: dict) -> str:
@@ -370,11 +384,13 @@ def _cli_refresh_creds(home: Path) -> bool:
     except Exception:
         pass
     try:
-        subprocess.run(
+        proc = subprocess.run(
             ["claude", "-p", "ping", "--output-format", "text"],
             capture_output=True, timeout=120,
             cwd=str(home),
         )
+        if proc.returncode != 0:
+            return False
         try:
             mark.parent.mkdir(parents=True, exist_ok=True)
             mark.write_text("1", encoding="utf-8")
@@ -438,7 +454,7 @@ def _read_credential_store(target: str) -> str:
         advapi32.CredFree(pcred)
 
 
-def fetch_claude_oauth(home: Path) -> dict:
+def fetch_claude_oauth(home: Path, *, isolated: bool = False) -> dict:
     """GET /api/oauth/usage (same endpoint Claude Code /usage uses).
 
     Returns {"status": "ok", "five_hour": {...}, "seven_day": {...}}
@@ -446,9 +462,9 @@ def fetch_claude_oauth(home: Path) -> dict:
     Token: `claude auth login` (auto-read) or env CLAUDE_CODE_OAUTH_TOKEN
     or write it to ~/.claude_oauth_token.
     """
-    tok = claude_token(home)
+    tok = claude_token(home, isolated=isolated)
     if not tok:
-        if claude_has_creds(home):
+        if claude_has_creds(home, isolated=isolated):
             return {"status": "expired"}
         return {"status": "missing_token"}
     try:
