@@ -5,6 +5,8 @@ import json
 import time
 import urllib.request
 
+import pytest
+
 import monitor as m
 
 
@@ -243,12 +245,80 @@ def test_cli_refresh_failure_does_not_start_cooldown(tmp_path, monkeypatch):
     assert not (local / "usage-monitor" / ".cli_refresh").exists()
 
 
-def test_day_bounds_span():
-    start, end = m.day_bounds(1)
-    assert end - start == 86400
-    import datetime as _dt
+@pytest.fixture()
+def local_zone(monkeypatch):
+    """Use real TZ conversion on POSIX, and IANA rules on Windows."""
+    import os
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
 
-    assert _dt.datetime.fromtimestamp(start).strftime("%H:%M") == "00:00"
+    if hasattr(time, "tzset"):
+        original = os.environ.get("TZ")
+
+        def select(name):
+            monkeypatch.setenv("TZ", name)
+            time.tzset()
+
+        yield select
+        if original is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = original
+        time.tzset()
+    else:
+        def select(name):
+            zone = ZoneInfo(name)
+
+            def localtime(timestamp):
+                return datetime.fromtimestamp(timestamp, zone).timetuple()
+
+            def mktime(parts):
+                value = datetime(*parts[:6], tzinfo=zone)
+                if parts[8] != -1:
+                    # Preserve explicit DST hints to reproduce the old bug.
+                    from datetime import timedelta, timezone
+                    standard = value.utcoffset() - value.dst()
+                    value = value.replace(tzinfo=timezone(
+                        standard + timedelta(hours=parts[8])))
+                return value.timestamp()
+
+            monkeypatch.setattr(time, "localtime", localtime)
+            monkeypatch.setattr(time, "mktime", mktime)
+
+        yield select
+
+
+@pytest.mark.parametrize("zone,now,days_ago,start_iso,end_iso,hours", [
+    ("America/New_York", "2026-03-08T12:00:00-04:00", 0,
+     "2026-03-08T00:00:00-05:00", "2026-03-09T00:00:00-04:00", 23),
+    ("America/New_York", "2026-11-01T12:00:00-05:00", 0,
+     "2026-11-01T00:00:00-04:00", "2026-11-02T00:00:00-05:00", 25),
+    ("America/New_York", "2026-03-09T00:30:00-04:00", 1,
+     "2026-03-08T00:00:00-05:00", "2026-03-09T00:00:00-04:00", 23),
+    ("America/New_York", "2026-11-01T23:30:00-05:00", 1,
+     "2026-10-31T00:00:00-04:00", "2026-11-01T00:00:00-04:00", 24),
+    ("Asia/Tokyo", "2026-03-01T00:30:00+09:00", 1,
+     "2026-02-28T00:00:00+09:00", "2026-03-01T00:00:00+09:00", 24),
+    ("Asia/Tokyo", "2026-01-01T00:30:00+09:00", 1,
+     "2025-12-31T00:00:00+09:00", "2026-01-01T00:00:00+09:00", 24),
+    ("Asia/Tokyo", "2026-03-02T12:00:00+09:00", 2,
+     "2026-02-28T00:00:00+09:00", "2026-03-01T00:00:00+09:00", 24),
+])
+def test_day_bounds(local_zone, monkeypatch, zone, now, days_ago,
+                    start_iso, end_iso, hours):
+    from datetime import datetime
+
+    local_zone(zone)
+    monkeypatch.setattr(time, "time", lambda: datetime.fromisoformat(now).timestamp())
+    start, end = m.day_bounds(days_ago)
+    assert start == int(datetime.fromisoformat(start_iso).timestamp())
+    assert end == int(datetime.fromisoformat(end_iso).timestamp())
+    assert end - start == hours * 3600
+    assert time.localtime(start)[3:6] == (0, 0, 0)
+    assert time.localtime(end)[3:6] == (0, 0, 0)
+    # Include the day's last second, but exclude the next midnight.
+    assert m.daily_max_used([(start - 1, 99), (start, 10),
+                             (end - 1, 80), (end, 100)], start, end) == 80
 
 
 def test_daily_max_used():
