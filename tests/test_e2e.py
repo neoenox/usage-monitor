@@ -34,6 +34,11 @@ def test_gui_render_e2e(app, fake_home):
     h.record({"codex_5h": 50.0, "claude_5h": 10.0})
     codex = m.scan_codex(fake_home)
     claude = m.scan_claude(fake_home)
+    import time as _time
+
+    future = int(_time.time()) + 3600
+    codex["rate_limits"]["primary"]["resets_at"] = future
+    codex["rate_limits"]["secondary"]["resets_at"] = future
     app._render(codex, claude)
     app.update_idletasks()
     assert "残り" in app.lbl5.cget("text")
@@ -155,8 +160,9 @@ def test_gui_oauth_ok_and_stale_labels(app):
     app.update_idletasks()
     assert "残り80%" in app.cl_lbl5.cget("text")
     assert "セーフ" in app.cl_lbl5.cget("text")
-    # stale: リセット時刻が過去なら注記が出る
+    # stale: リセット時刻が過去なら新窓扱いになる
     codex["rate_limits"]["primary"]["resets_at"] = 1000000000
     app._render(codex, claude_ok)
     app.update_idletasks()
-    assert "新データ待ち" in app.lbl5.cget("text")
+    assert "新窓" in app.lbl5.cget("text")
+    assert "残り100%" in app.lbl5.cget("text")

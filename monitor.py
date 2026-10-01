@@ -51,6 +51,28 @@ def is_stale(reset) -> bool:
         return False
 
 
+def normalize_snapshot(codex: dict, claude: dict) -> tuple[dict, dict]:
+    """窓終了後の古い値を新窓(使用0%)に正規化。起動直後や朝一番の表示崩れ防止。
+    元dictは変更しない。new_window_* フラグを付与。"""
+    import copy
+
+    codex, claude = copy.deepcopy(codex), copy.deepcopy(claude)
+    rl = codex.get("rate_limits", {}) or {}
+    for key, flag in (("primary", "new_window_5h"), ("secondary", "new_window_wk")):
+        w = rl.get(key, {}) or {}
+        if w.get("resets_at") and is_stale(w.get("resets_at")):
+            w["used_percent"] = 0.0
+            codex[flag] = True
+    oauth = claude.get("oauth", {}) or {}
+    if oauth.get("status") == "ok":
+        for key, flag in (("five_hour", "new_window_5h"), ("seven_day", "new_window_wk")):
+            w = oauth.get(key, {}) or {}
+            if w.get("resets_at") and is_stale(w.get("resets_at")):
+                w["utilization"] = 0.0
+                claude[flag] = True
+    return codex, claude
+
+
 def fmt_countdown(target) -> str:
     """リセット時刻までの残り時間。epoch数値 or ISO文字列を受け付ける。"""
     import time
@@ -539,6 +561,7 @@ def main() -> int:
 
     codex = scan_codex(home)
     claude = scan_claude(home)
+    codex, claude = normalize_snapshot(codex, claude)
 
     if args.json:
         print(json.dumps({"codex": codex, "claude": claude}, ensure_ascii=False, indent=2))
@@ -567,7 +590,7 @@ def main() -> int:
         print(f"  5h      : {100 - p_used:.0f}% left (used {p_used:.0f}%) "
               f"reset={fmt_ts(pri.get('resets_at'))} ({fmt_countdown(pri.get('resets_at'))}) "
               f"[{pace_label(p_used, 300, pri.get('resets_at'), h5, False)}]"
-              f"{' [stale]' if is_stale(pri.get('resets_at')) else ''}")
+              f"{' (new window)' if codex.get('new_window_5h') else ''}")
         print(f"  weekly  : {100 - s_used:.0f}% left (used {s_used:.0f}%) "
               f"reset={fmt_ts(sec.get('resets_at'))} ({fmt_countdown(sec.get('resets_at'))}) "
               f"[{pace_label(s_used, 10080, sec.get('resets_at'), hw)}] "

@@ -185,6 +185,30 @@ def test_is_stale():
     assert m.is_stale(None) is False
 
 
+def test_normalize_snapshot():
+    import time as _time
+
+    past, future = int(_time.time()) - 3600, int(_time.time()) + 3600
+    codex = {"rate_limits": {
+        "primary": {"used_percent": 99.0, "resets_at": past},
+        "secondary": {"used_percent": 30.0, "resets_at": future}}}
+    claude = {"oauth": {"status": "ok",
+                        "five_hour": {"utilization": 50.0,
+                                      "resets_at": "2000-01-01T00:00:00+00:00"},
+                        "seven_day": {"utilization": 10.0,
+                                      "resets_at": "2999-01-01T00:00:00+00:00"}}}
+    cx, cl = m.normalize_snapshot(codex, claude)
+    assert cx["rate_limits"]["primary"]["used_percent"] == 0.0
+    assert cx["new_window_5h"] is True
+    assert cx["rate_limits"]["secondary"]["used_percent"] == 30.0
+    assert "new_window_wk" not in cx
+    assert cl["oauth"]["five_hour"]["utilization"] == 0.0
+    assert cl["new_window_5h"] is True
+    assert cl["oauth"]["seven_day"]["utilization"] == 10.0
+    # 元dictは不変
+    assert codex["rate_limits"]["primary"]["used_percent"] == 99.0
+
+
 def test_custom_home_does_not_use_real_credentials_or_network(tmp_path, monkeypatch):
     """A synthetic HOME must stay isolated from this machine's auth state."""
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "real-machine-token")

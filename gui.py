@@ -164,6 +164,7 @@ class App(tk.Tk):
         self.after(0, lambda: self._render(codex, claude))
 
     def _render(self, codex: dict, claude: dict) -> None:
+        codex, claude = m.normalize_snapshot(codex, claude)
         self._last = (codex, claude)
         rl = codex.get("rate_limits", {}) or {}
         pri = rl.get("primary", {}) or {}
@@ -180,12 +181,14 @@ class App(tk.Tk):
             self.bar5["value"] = 100 - p_used
             self.lbl5.config(text=self._codex_label(
                 "5h", p_used, pri.get("resets_at"), m.fmt_ts,
-                m.pace_label(p_used, 300, pri.get("resets_at"), h.recent("codex_5h"), False)))
+                m.pace_label(p_used, 300, pri.get("resets_at"), h.recent("codex_5h"), False),
+                codex.get("new_window_5h", False)))
             self.barW["value"] = 100 - s_used
             self.lblW.config(text=self._codex_label(
                 "週", s_used, sec.get("resets_at"), m.fmt_ts,
                 m.pace_label(s_used, 10080, sec.get("resets_at"), h.recent("codex_wk"))
-                + f" <{m.week_pace(s_used, 10080, sec.get('resets_at'))}>"))
+                + f" <{m.week_pace(s_used, 10080, sec.get('resets_at'))}>",
+                codex.get("new_window_wk", False)))
         else:
             self.bar5["value"] = 0
             self.barW["value"] = 0
@@ -218,10 +221,13 @@ class App(tk.Tk):
                 bar["value"] = 100 - used
                 win_min = 300 if key == "five_hour" else 10080
                 hist_key = "claude_5h" if key == "five_hour" else "claude_wk"
+                flag = "new_window_5h" if key == "five_hour" else "new_window_wk"
                 pace = m.pace_label(used, win_min, m.iso_to_epoch(w.get("resets_at")),
                                     h.recent(hist_key), show_date=(key != "five_hour"))
                 extra = (f" <{m.week_pace(used, 10080, m.iso_to_epoch(w.get('resets_at')))}>"
                          if key == "seven_day" else "")
+                if claude.get(flag):
+                    extra += "（新窓）"
                 lbl.config(text=f"{tag} 残り{100 - used:.0f}% (使用{used:.0f}%) "
                                 f"reset={m.fmt_ts_iso(w.get('resets_at'))} ({m.fmt_countdown(w.get('resets_at'))}) [{pace}]{extra}")
                 if key == "five_hour":
@@ -266,12 +272,14 @@ class App(tk.Tk):
         self._schedule_tick()
 
     @staticmethod
-    def _codex_label(tag: str, used: float, resets_at, fmter, pace: str = "") -> str:
+    def _codex_label(tag: str, used: float, resets_at, fmter, pace: str = "", new_window: bool = False) -> str:
         base = (f"{tag} 残り{100 - used:.0f}% (使用{used:.0f}%) "
                 f"reset={fmter(resets_at)} ({m.fmt_countdown(resets_at)})")
         if pace:
             base += f" [{pace}]"
-        if m.is_stale(resets_at):
+        if new_window:
+            base += "（新窓）"
+        elif m.is_stale(resets_at):
             base += "（窓終了・新データ待ち）"
         return base
 
@@ -312,18 +320,20 @@ class App(tk.Tk):
             pu, su = float(pri.get("used_percent") or 0), float(sec.get("used_percent") or 0)
             self.lbl5.config(text=self._codex_label(
                 "5h", pu, pri.get("resets_at"), m.fmt_ts,
-                m.pace_label(pu, 300, pri.get("resets_at"), h.recent("codex_5h"), False)))
+                m.pace_label(pu, 300, pri.get("resets_at"), h.recent("codex_5h"), False),
+                codex.get("new_window_5h", False)))
             self.lblW.config(text=self._codex_label(
                 "週", su, sec.get("resets_at"), m.fmt_ts,
                 m.pace_label(su, 10080, sec.get("resets_at"), h.recent("codex_wk"))
-                + f" <{m.week_pace(su, 10080, sec.get('resets_at'))}>"))
+                + f" <{m.week_pace(su, 10080, sec.get('resets_at'))}>",
+                codex.get("new_window_wk", False)))
         except (TypeError, ValueError):
             pass
         oauth = claude.get("oauth", {}) or {}
         if oauth.get("status") == "ok":
-            for lbl, key, tag, win_min, hist_key in (
-                    (self.cl_lbl5, "five_hour", "5h", 300, "claude_5h"),
-                    (self.cl_lblW, "seven_day", "週", 10080, "claude_wk")):
+            for lbl, key, tag, win_min, hist_key, flag in (
+                    (self.cl_lbl5, "five_hour", "5h", 300, "claude_5h", "new_window_5h"),
+                    (self.cl_lblW, "seven_day", "週", 10080, "claude_wk", "new_window_wk")):
                 w = oauth.get(key, {}) or {}
                 try:
                     used = float(w.get("utilization"))
@@ -331,6 +341,8 @@ class App(tk.Tk):
                                         h.recent(hist_key), show_date=(key != "five_hour"))
                     extra = (f" <{m.week_pace(used, 10080, m.iso_to_epoch(w.get('resets_at')))}>"
                              if key == "seven_day" else "")
+                    if claude.get(flag):
+                        extra += "（新窓）"
                     lbl.config(text=f"{tag} 残り{100 - used:.0f}% (使用{used:.0f}%) "
                                     f"reset={m.fmt_ts_iso(w.get('resets_at'))} ({m.fmt_countdown(w.get('resets_at'))}) [{pace}]{extra}")
                 except (TypeError, ValueError):
