@@ -167,11 +167,13 @@ def day_bounds(days_ago: int = 1) -> tuple[int, int]:
     """days_ago日前のローカル日境界 (start, end) をepoch秒で返す。"""
     import time
 
-    t = time.time() - days_ago * 86400
-    lt = time.localtime(t)
-    start = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0,
-                             lt.tm_wday, lt.tm_yday, lt.tm_isdst)))
-    return start, start + 86400
+    lt = time.localtime(time.time())
+    day = datetime(lt.tm_year, lt.tm_mon, lt.tm_mday) - timedelta(days=days_ago)
+    next_day = day + timedelta(days=1)
+    # Resolve DST independently at each midnight, not at the current time.
+    start = int(time.mktime(day.timetuple()))
+    end = int(time.mktime(next_day.timetuple()))
+    return start, end
 
 
 def daily_max_used(points: list[tuple[int, float]], start: int, end: int) -> float | None:
