@@ -56,3 +56,22 @@ def test_double_ring_image(codex_data):
     px = img.load()
     greens = sum(1 for x in range(64) for y in range(64) if px[x, y][1] > 150 and px[x, y][0] < 100)
     assert greens > 20
+
+
+def test_settings_roundtrip(tmp_path, monkeypatch):
+    import settings as s
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert s.load() == {"warn_at": 20.0, "crit_at": 10.0}
+    assert s.save(30, 5) is None
+    assert s.load() == {"warn_at": 30.0, "crit_at": 5.0}
+    assert "数値" in (s.save("x", 5) or "")
+    assert "0 <" in (s.save(5, 30) or "")
+    assert s.load() == {"warn_at": 30.0, "crit_at": 5.0}  # 不正値は保存されない
+
+
+def test_alert_custom_thresholds():
+    T = gui.TrayController
+    assert T.alert_for(25, None, 30, 5) == "warn"
+    assert T.alert_for(25, None) is None
+    assert T.alert_for(4, None, 30, 5) == "crit"
