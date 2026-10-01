@@ -9,6 +9,7 @@ from tkinter import ttk
 
 import history as h
 import monitor as m
+import settings
 
 
 STARTUP_LNK = "usage-monitor.lnk"
@@ -151,6 +152,32 @@ class App(tk.Tk):
         self._sync_autostart_btn()
         self.status = ttk.Label(row, text="")
         self.status.pack(side="left", padx=6)
+
+        # 通知閾値 (残量%)
+        trow = ttk.Frame(root)
+        trow.pack(fill="x", pady=4)
+        ttk.Label(trow, text="通知 警告").pack(side="left")
+        self.ent_warn = ttk.Entry(trow, width=5)
+        self.ent_warn.pack(side="left", padx=2)
+        ttk.Label(trow, text="緊急").pack(side="left")
+        self.ent_crit = ttk.Entry(trow, width=5)
+        self.ent_crit.pack(side="left", padx=2)
+        ttk.Button(trow, text="保存", command=self.save_thresholds).pack(side="left", padx=6)
+        self._sync_threshold_entries()
+
+    def save_thresholds(self) -> None:
+        err = settings.save(self.ent_warn.get(), self.ent_crit.get())
+        if err:
+            self.status.config(text=err)
+        else:
+            self.status.config(text="閾値を保存しました")
+            self._sync_threshold_entries()
+
+    def _sync_threshold_entries(self) -> None:
+        cfg = settings.load()
+        for ent, key in ((self.ent_warn, "warn_at"), (self.ent_crit, "crit_at")):
+            ent.delete(0, tk.END)
+            ent.insert(0, str(cfg[key]))
 
     def refresh(self) -> None:
         self.status.config(text="集計中...")
@@ -488,10 +515,6 @@ def tray_tooltip(codex: dict, claude: dict) -> str:
 class TrayController:
     """タスクトレイ常駐: ホバー表示・5分毎更新・左クリックで開く・制限接近アラート。"""
 
-    WARN_AT = 20.0
-    CRIT_AT = 10.0
-    REARM_ABOVE = 25.0
-
     def __init__(self, app: "App") -> None:
         import tray_win32
 
@@ -577,11 +600,12 @@ class TrayController:
             pass
 
     @staticmethod
-    def alert_for(left: float, prev: str | None) -> str | None:
+    def alert_for(left: float, prev: str | None,
+                  warn_at: float = 20.0, crit_at: float = 10.0) -> str | None:
         """純粋関数: 残量と前回通知状態から今回の通知レベル。テスト容易化のため分離。"""
-        if left <= TrayController.CRIT_AT:
+        if left <= crit_at:
             return None if prev == "crit" else "crit"
-        if left <= TrayController.WARN_AT:
+        if left <= warn_at:
             return None if prev in ("warn", "crit") else "warn"
         return None
 
@@ -610,10 +634,12 @@ class TrayController:
                     continue
                 metrics.append((name, left, f"リセット{m.fmt_ts_iso(w.get('resets_at'))}"))
         for name, left, extra in metrics:
-            if left > self.REARM_ABOVE:
+            cfg = settings.load()
+            warn_at, crit_at = cfg["warn_at"], cfg["crit_at"]
+            if left > warn_at + 5:
                 self.notified.pop(name, None)
                 continue
-            level = self.alert_for(left, self.notified.get(name))
+            level = self.alert_for(left, self.notified.get(name), warn_at, crit_at)
             if level is None:
                 continue
             self.notified[name] = level
