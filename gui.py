@@ -527,6 +527,54 @@ class TrayController:
         tray_icon_image(codex, claude).save(self._ico_path(), format="ICO", sizes=[(64, 64)])
         self.tray.set_icon(self._ico_path())
         self._check_alerts(codex, claude)
+        self._maybe_daily_report(codex, claude)
+
+    def _maybe_daily_report(self, codex: dict, claude: dict) -> None:
+        """その日最初の更新時に前日のサマリーを1発通知。履歴がなければ出さない。"""
+        import datetime
+        import os as _os
+        from pathlib import Path as _P
+
+        import history as _h
+
+        today = datetime.date.today().isoformat()
+        mark = _P(_os.environ.get("LOCALAPPDATA", str(_P.home()))) / "usage-monitor" / ".daily_report"
+        try:
+            if mark.exists() and mark.read_text(encoding="utf-8").strip() == today:
+                return
+        except Exception:
+            pass
+        start, end = m.day_bounds(1)
+        yesterday = {}
+        for metric in ("codex_5h", "codex_wk", "claude_5h", "claude_wk"):
+            try:
+                yesterday[metric] = m.daily_max_used(_h.recent(metric, hours=72), start, end)
+            except Exception:
+                yesterday[metric] = None
+        if all(v is None for v in yesterday.values()):
+            return
+        verdicts = {}
+        sec = (codex.get("rate_limits", {}) or {}).get("secondary", {}) or {}
+        try:
+            verdicts["codex_wk"] = m.week_pace(float(sec.get("used_percent")), 10080,
+                                               sec.get("resets_at"))
+        except (TypeError, ValueError):
+            pass
+        oauth = claude.get("oauth", {}) or {}
+        if oauth.get("status") == "ok":
+            w = oauth.get("seven_day", {}) or {}
+            try:
+                verdicts["claude_wk"] = m.week_pace(
+                    float(w.get("utilization")), 10080, m.iso_to_epoch(w.get("resets_at")))
+            except (TypeError, ValueError):
+                pass
+        try:
+            self.tray.balloon("朝の使用量レポート",
+                              "\n".join(m.daily_report_lines(yesterday, verdicts)))
+            mark.parent.mkdir(parents=True, exist_ok=True)
+            mark.write_text(today, encoding="utf-8")
+        except Exception:
+            pass
 
     @staticmethod
     def alert_for(left: float, prev: str | None) -> str | None:

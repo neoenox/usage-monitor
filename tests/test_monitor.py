@@ -60,8 +60,7 @@ def test_pace_label():
 
 
 def test_week_pace():
-    now = int(time.time())
-    # 週窓の半分経過で使用80% → over
+    now = int(time.time())    # 週窓の半分経過で使用80% → over
     reset = now + 7 * 86400 // 2
     assert m.week_pace(80.0, 10080, reset).startswith("over pace")
     # 半分経過で使用10% → under
@@ -242,3 +241,26 @@ def test_cli_refresh_failure_does_not_start_cooldown(tmp_path, monkeypatch):
 
     assert m._cli_refresh_creds(tmp_path) is False
     assert not (local / "usage-monitor" / ".cli_refresh").exists()
+
+
+def test_day_bounds_span():
+    start, end = m.day_bounds(1)
+    assert end - start == 86400
+    import datetime as _dt
+
+    assert _dt.datetime.fromtimestamp(start).strftime("%H:%M") == "00:00"
+
+
+def test_daily_max_used():
+    pts = [(100, 10.0), (200, 90.0), (300, 50.0)]
+    assert m.daily_max_used(pts, 150, 250) == 90.0
+    assert m.daily_max_used(pts, 400, 500) is None
+
+
+def test_daily_report_lines():
+    lines = m.daily_report_lines(
+        {"codex_5h": 99.0, "codex_wk": 54.0, "claude_5h": None, "claude_wk": 11.0},
+        {"codex_wk": "on pace (経過47%/使用54%)"})
+    assert "Codex 5h最大99%" in lines[0]
+    assert "Claude 5h-" in lines[0]
+    assert any("Codex週" in ln and "on pace" in ln for ln in lines)
