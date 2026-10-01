@@ -166,3 +166,37 @@ def test_gui_oauth_ok_and_stale_labels(app):
     app.update_idletasks()
     assert "新窓" in app.lbl5.cget("text")
     assert "残り100%" in app.lbl5.cget("text")
+
+
+def test_daily_report_once_per_day(tmp_path, monkeypatch):
+    """初回更新で前日レポート1発・同日2回目は出さない。"""
+    import time as _time
+
+    import gui
+    import history as h
+    import monitor as m
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    hist_db = tmp_path / "hist.db"
+    start, _ = m.day_bounds(1)
+    h.record({"codex_5h": 99.0, "codex_wk": 54.0}, path=hist_db, ts=start + 3600)
+    real_recent = h.recent
+    monkeypatch.setattr(
+        h, "recent",
+        lambda metric, hours=72: real_recent(metric, hours=hours, path=hist_db))
+
+    ctl = gui.TrayController.__new__(gui.TrayController)
+    ctl.notified = {}
+    fake = _FakeTray()
+    ctl.tray = fake
+    codex = {"has_rate": True, "rate_limits": {
+        "primary": {"used_percent": 1.0, "window_minutes": 300,
+                     "resets_at": int(_time.time()) + 3600},
+        "secondary": {"used_percent": 54.0, "window_minutes": 10080,
+                      "resets_at": int(_time.time()) + 86400}}}
+    claude = {"oauth": {"status": "missing_token"}}
+    ctl._maybe_daily_report(codex, claude)
+    assert len(fake.balloons) == 1
+    assert "Codex 5h最大99%" in fake.balloons[0][1]
+    ctl._maybe_daily_report(codex, claude)
+    assert len(fake.balloons) == 1  # 同日は再通知しない

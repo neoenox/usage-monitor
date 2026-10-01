@@ -163,6 +163,39 @@ def week_pace(used: float | None, window_min: int, reset_epoch: int | None) -> s
     return f"on pace (経過{expected:.0f}%/使用{used:.0f}%)"
 
 
+def day_bounds(days_ago: int = 1) -> tuple[int, int]:
+    """days_ago日前のローカル日境界 (start, end) をepoch秒で返す。"""
+    import time
+
+    t = time.time() - days_ago * 86400
+    lt = time.localtime(t)
+    start = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0,
+                             lt.tm_wday, lt.tm_yday, lt.tm_isdst)))
+    return start, start + 86400
+
+
+def daily_max_used(points: list[tuple[int, float]], start: int, end: int) -> float | None:
+    """指定範囲の使用%最大値。点がなければNone。"""
+    vals = [float(u) for t, u in points if start <= int(t) < end]
+    return max(vals) if vals else None
+
+
+def daily_report_lines(yesterday: dict[str, float | None],
+                       week_verdicts: dict[str, str]) -> list[str]:
+    """朝バルーン用の3-4行レポートを生成。"""
+    names = (("codex_5h", "Codex 5h"), ("codex_wk", "Codex週"),
+             ("claude_5h", "Claude 5h"), ("claude_wk", "Claude週"))
+    parts = []
+    for key, label in names:
+        v = yesterday.get(key)
+        parts.append(f"{label}最大{v:.0f}%" if v is not None else f"{label}-")
+    lines = ["昨日 " + "・".join(parts)]
+    for key, label in (("codex_wk", "Codex週"), ("claude_wk", "Claude週")):
+        if week_verdicts.get(key):
+            lines.append(f"{label}: {week_verdicts[key]}")
+    return lines
+
+
 def fmt_ts_iso(s: str | None) -> str:
     if not s:
         return "-"
