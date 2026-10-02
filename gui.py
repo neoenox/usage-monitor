@@ -193,6 +193,8 @@ class App(tk.Tk):
         for label in labels:
             label.config(text="読み込み中…")
         self.cl_models.configure(text="")
+        self.update_idletasks()
+        canvas.yview_moveto(0)
 
     def _set_window_icon(self) -> None:
         """タイトルバー左上のアイコン (exe埋め込みとは別に必要)。"""
