@@ -107,7 +107,31 @@ class App(tk.Tk):
         self._tick_job: str | None = None
         self._set_window_icon()
         self._build()
+        self._fit_overview()
         self.refresh()
+
+    def _fit_overview(self) -> None:
+        """Size the initial window for all quota rows, including wrapped details."""
+        self.update_idletasks()
+        # Rendered quota details use two lines; reserve these before data arrives.
+        labels = (self.lbl5, self.lblW, self.cl_lbl5, self.cl_lblW)
+        for label in labels:
+            label.config(text="5h 残り100% (使用0%) reset=00:00 (残り時間) [利用ペース]")
+        self.cl_models.configure(text="Opus週使用0% / Sonnet週使用0%")
+        self.update_idletasks()
+        canvas = self.overview_canvas
+        content_height = canvas.bbox("all")[3]
+        chrome_height = self.winfo_height() - canvas.winfo_height()
+        height = min(content_height + chrome_height + 24, self.winfo_screenheight() - 80)
+        self.geometry(f"600x{height}")
+        self.update_idletasks()
+        content_height = canvas.bbox("all")[3]
+        chrome_height = self.winfo_height() - canvas.winfo_height()
+        height = min(content_height + chrome_height + 24, self.winfo_screenheight() - 80)
+        self.geometry(f"600x{height}+40+40")
+        for label in labels:
+            label.config(text="読み込み中…")
+        self.cl_models.configure(text="")
 
     def _set_window_icon(self) -> None:
         """タイトルバー左上のアイコン (exe埋め込みとは別に必要)。"""

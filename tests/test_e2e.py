@@ -215,3 +215,17 @@ def test_overview_scroll_reaches_last_quota(app):
     assert bottom <= viewport_bottom
     assert app.lbl5.value.cget("text") == "残り 80%"
     app.withdraw()
+
+
+def test_initial_size_shows_all_overview_without_scrolling(app):
+    app.deiconify()
+    app._fit_overview()
+    for label in (app.lbl5, app.lblW, app.cl_lbl5, app.cl_lblW):
+        label.config(text="5h 残り80% (使用20%) reset=10/02 14:00 (4時間) [現在のペースで継続可能]")
+    app.cl_models.config(text="Opus週使用10% / Sonnet週使用20%")
+    app.update()
+    assert app.overview_canvas.yview()[0] == 0
+    bottom = app.cl_models.winfo_rooty() + app.cl_models.winfo_height()
+    assert bottom <= app.overview_canvas.winfo_rooty() + app.overview_canvas.winfo_height()
+    assert app.winfo_y() + app.winfo_height() <= app.winfo_screenheight()
+    app.withdraw()
