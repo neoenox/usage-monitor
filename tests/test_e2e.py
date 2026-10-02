@@ -200,3 +200,18 @@ def test_daily_report_once_per_day(tmp_path, monkeypatch):
     assert "Codex 5h最大99%" in fake.balloons[0][1]
     ctl._maybe_daily_report(codex, claude)
     assert len(fake.balloons) == 1  # 同日は再通知しない
+
+
+def test_overview_scroll_reaches_last_quota(app):
+    app.deiconify()
+    app.geometry("520x640")
+    for label in (app.lbl5, app.lblW, app.cl_lbl5, app.cl_lblW):
+        label.config(text="5h 残り80% (使用20%) reset=14:00 (4時間) [余裕あり]")
+    app.update()
+    app.overview_canvas.yview_moveto(1.0)
+    app.update()
+    bottom = app.cl_barW.winfo_rooty() + app.cl_barW.winfo_height()
+    viewport_bottom = app.overview_canvas.winfo_rooty() + app.overview_canvas.winfo_height()
+    assert bottom <= viewport_bottom
+    assert app.lbl5.value.cget("text") == "残り 80%"
+    app.withdraw()

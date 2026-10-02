@@ -51,3 +51,13 @@ def test_schedule_tick_cancels_previous_job():
     assert len(dummy.scheduled) == 1
     assert dummy.scheduled[0][0] == 60_000
     assert dummy._tick_job == "new"
+
+
+def test_remaining_text_separates_value_and_reset():
+    value, detail = gui.remaining_text("5h 残り80% (使用20%) reset=12:00 (1時間) [余裕あり]")
+    assert value == "残り 80%"
+    assert detail == "リセット：12:00 (1時間)\n予測：余裕あり"
+
+
+def test_remaining_text_preserves_unavailable_reason():
+    assert gui.remaining_text("未連携: ログインしてください") == ("", "未連携: ログインしてください")

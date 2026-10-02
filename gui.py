@@ -59,11 +59,51 @@ def set_autostart(on: bool) -> bool:
         return False
 
 
+def remaining_text(text: str) -> tuple[str, str]:
+    """Split quota summaries into a prominent remaining value and readable details."""
+    import re
+
+    match = re.search(r"残り(-?[\d.]+)% \(使用[\d.]+%\)", text)
+    if not match:
+        return "", text
+    headline = f"残り {match.group(1)}%"
+    detail = text[match.end():].strip().replace("reset=", "リセット：")
+    detail = detail.replace(" [", "\n予測：").replace("]", "")
+    return headline, detail
+
+
+class RemainingLabel(ttk.Frame):
+    """Quota label compatible with the existing render and countdown updates."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.value = ttk.Label(self, style="Remaining.TLabel")
+        self.value.pack(anchor="w")
+        self.detail = ttk.Label(self, justify="left", style="Hint.TLabel")
+        self.detail.pack(fill="x")
+        self.bind("<Configure>", lambda event: self.detail.configure(wraplength=max(100, event.width)))
+
+    def cget(self, key):
+        if key == "text":
+            return getattr(self, "_text", "")
+        return super().cget(key)
+
+    def config(self, *, text):
+        self._text = text
+        headline, detail = remaining_text(text)
+        self.value.configure(text=headline)
+        if headline:
+            self.value.pack(anchor="w", before=self.detail)
+        else:
+            self.value.pack_forget()
+        self.detail.configure(text=detail)
+
+
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"Usage Monitor v{m.__version__} - codex + claude")
-        self.geometry("560x920")
+        self.geometry("600x740")
         self._tick_job: str | None = None
         self._set_window_icon()
         self._build()
@@ -88,82 +128,103 @@ class App(tk.Tk):
             pass
 
     def _build(self) -> None:
-        root = ttk.Frame(self, padding=12)
+        self.minsize(520, 640)
+        style = ttk.Style(self)
+        style.configure("Remaining.TLabel", font=("Yu Gothic UI", 20, "bold"))
+        style.configure("Title.TLabel", font=("Yu Gothic UI", 16, "bold"))
+        style.configure("Hint.TLabel", foreground="#555555")
+        root = ttk.Frame(self, padding=16)
         root.pack(fill="both", expand=True)
+        header = ttk.Frame(root)
+        header.pack(fill="x", pady=(0, 12))
+        ttk.Label(header, text="Usage Monitor", style="Title.TLabel").pack(side="left")
+        self.btn_refresh = ttk.Button(header, text="最新情報に更新", command=self.refresh)
+        self.btn_refresh.pack(side="right")
+        self.status = ttk.Label(root, text="", style="Hint.TLabel", wraplength=480)
+        self.status.pack(anchor="w", pady=(0, 8))
+        tabs = ttk.Notebook(root)
+        tabs.pack(fill="both", expand=True)
+        overview_page = ttk.Frame(tabs)
+        overview_canvas = tk.Canvas(overview_page, highlightthickness=0)
+        scroll = ttk.Scrollbar(overview_page, orient="vertical", command=overview_canvas.yview)
+        overview_canvas.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        overview_canvas.pack(side="left", fill="both", expand=True)
+        overview = ttk.Frame(overview_canvas, padding=12)
+        content = overview_canvas.create_window((0, 0), window=overview, anchor="nw")
+        overview.bind("<Configure>", lambda event: overview_canvas.configure(scrollregion=overview_canvas.bbox("all")))
+        overview_canvas.bind("<Configure>", lambda event: overview_canvas.itemconfigure(content, width=event.width))
+        self.overview_canvas = overview_canvas
+        self.bind("<MouseWheel>", lambda event: overview_canvas.yview_scroll(-int(event.delta / 120), "units")
+                  if tabs.index(tabs.select()) == 0 else None)
+        trend = ttk.Frame(tabs, padding=12)
+        config = ttk.Frame(tabs, padding=12)
+        for frame, title in ((overview_page, "概要"), (trend, "推移"), (config, "設定")):
+            tabs.add(frame, text=title)
+        ttk.Label(overview, text="バーは利用枠の残量を表します", style="Hint.TLabel").pack(anchor="w")
 
-        ttk.Label(root, text="Usage Monitor (snapshot)", font=("", 13, "bold")).pack(anchor="w")
+        def window(parent, title):
+            row = ttk.Frame(parent)
+            row.pack(fill="x", pady=(8, 0))
+            ttk.Label(row, text=title, font=("Yu Gothic UI", 10, "bold")).pack(anchor="w")
+            label = RemainingLabel(row)
+            label.pack(fill="x")
+            bar = ttk.Progressbar(row, maximum=100)
+            bar.pack(fill="x", pady=(4, 0))
+            return bar, label
 
-        # Codex
-        cx = ttk.LabelFrame(root, text="Codex", padding=10)
-        cx.pack(fill="x", pady=8)
-        self.cx_info = ttk.Label(cx, text="...")
+        cx = ttk.LabelFrame(overview, text="Codex", padding=10)
+        cx.pack(fill="x", pady=(8, 4))
+        self.bar5, self.lbl5 = window(cx, "5時間の利用枠")
+        self.barW, self.lblW = window(cx, "週間の利用枠")
+        cl = ttk.LabelFrame(overview, text="Claude", padding=10)
+        cl.pack(fill="x", pady=4)
+        self.cl_bar5, self.cl_lbl5 = window(cl, "5時間の利用枠")
+        self.cl_barW, self.cl_lblW = window(cl, "週間の利用枠")
+        self.cl_models = ttk.Label(cl, text="", style="Hint.TLabel")
+        self.cl_models.pack(anchor="w", pady=(4, 0))
+
+        ttk.Label(trend, text="5時間枠の使用率の推移（%）", font=("Yu Gothic UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(trend, text="直近72時間から最大48件を表示", style="Hint.TLabel").pack(anchor="w", pady=(4, 12))
+        self.chart = tk.Canvas(trend, width=440, height=230, bg="white", highlightthickness=1,
+                               highlightbackground="#cccccc")
+        self.chart.pack(fill="x")
+        self.chart.bind("<Configure>", lambda event: self._draw_chart())
+        details = ttk.LabelFrame(trend, text="ローカル履歴の集計（参考値）", padding=10)
+        details.pack(fill="x", pady=12)
+        self.cx_info = ttk.Label(details, text="…", wraplength=440)
         self.cx_info.pack(anchor="w")
-        self.cx_tok = ttk.Label(cx, text="...", font=("", 10))
-        self.cx_tok.pack(anchor="w")
-        ttk.Label(cx, text="5h").pack(anchor="w")
-        self.bar5 = ttk.Progressbar(cx, maximum=100, length=440)
-        self.bar5.pack(fill="x")
-        self.lbl5 = ttk.Label(cx, text="", wraplength=430, justify="left")
-        self.lbl5.pack(anchor="w")
-        ttk.Label(cx, text="weekly").pack(anchor="w")
-        self.barW = ttk.Progressbar(cx, maximum=100, length=440)
-        self.barW.pack(fill="x")
-        self.lblW = ttk.Label(cx, text="", wraplength=430, justify="left")
-        self.lblW.pack(anchor="w")
-        ttk.Label(cx, text="context (現セッション)").pack(anchor="w")
-        self.barCtx = ttk.Progressbar(cx, maximum=100, length=440)
+        self.cx_tok = ttk.Label(details, text="…")
+        self.cx_tok.pack(anchor="w", pady=(0, 8))
+        self.cl_info = ttk.Label(details, text="…", wraplength=440)
+        self.cl_info.pack(anchor="w")
+        self.cl_tok = ttk.Label(details, text="…")
+        self.cl_tok.pack(anchor="w")
+        ttk.Label(details, text="Codex：現在のセッションのコンテキスト使用率").pack(anchor="w", pady=(12, 4))
+        self.barCtx = ttk.Progressbar(details, maximum=100)
         self.barCtx.pack(fill="x")
-        self.lblCtx = ttk.Label(cx, text="")
+        self.lblCtx = ttk.Label(details, text="")
         self.lblCtx.pack(anchor="w")
 
-        # Claude
-        cl = ttk.LabelFrame(root, text="Claude", padding=10)
-        cl.pack(fill="x", pady=8)
-        self.cl_info = ttk.Label(cl, text="...")
-        self.cl_info.pack(anchor="w")
-        self.cl_tok = ttk.Label(cl, text="...", font=("", 10))
-        self.cl_tok.pack(anchor="w")
-        ttk.Label(cl, text="サブスク 5h").pack(anchor="w")
-        self.cl_bar5 = ttk.Progressbar(cl, maximum=100, length=440)
-        self.cl_bar5.pack(fill="x")
-        self.cl_lbl5 = ttk.Label(cl, text="", wraplength=430, justify="left")
-        self.cl_lbl5.pack(anchor="w")
-        ttk.Label(cl, text="サブスク weekly").pack(anchor="w")
-        self.cl_barW = ttk.Progressbar(cl, maximum=100, length=440)
-        self.cl_barW.pack(fill="x")
-        self.cl_lblW = ttk.Label(cl, text="", wraplength=430, justify="left")
-        self.cl_lblW.pack(anchor="w")
-        self.cl_models = ttk.Label(cl, text="", font=("", 9))
-        self.cl_models.pack(anchor="w")
-
-        # 推移グラフ
-        hist = ttk.LabelFrame(root, text="推移（5h使用%）", padding=10)
-        hist.pack(fill="x", pady=8)
-        self.chart = tk.Canvas(hist, width=440, height=230, bg="white", highlightthickness=1,
-                               highlightbackground="#ccc")
-        self.chart.pack()
-
-        # controls
-        row = ttk.Frame(root)
-        row.pack(fill="x", pady=8)
-        ttk.Button(row, text="更新", command=self.refresh).pack(side="left")
-        self.btn_auto = ttk.Button(row, text="", command=self.toggle_autostart)
-        self.btn_auto.pack(side="left", padx=6)
-        self._sync_autostart_btn()
-        self.status = ttk.Label(row, text="")
-        self.status.pack(side="left", padx=6)
-
-        # 通知閾値 (残量%)
-        trow = ttk.Frame(root)
-        trow.pack(fill="x", pady=4)
-        ttk.Label(trow, text="通知 警告").pack(side="left")
-        self.ent_warn = ttk.Entry(trow, width=5)
-        self.ent_warn.pack(side="left", padx=2)
-        ttk.Label(trow, text="緊急").pack(side="left")
-        self.ent_crit = ttk.Entry(trow, width=5)
-        self.ent_crit.pack(side="left", padx=2)
-        ttk.Button(trow, text="保存", command=self.save_thresholds).pack(side="left", padx=6)
+        ttk.Label(config, text="通知", font=("Yu Gothic UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(config, text="トレイ常駐中、残量が指定値以下になると通知します。\n緊急は警告より小さい値に設定してください。",
+                  style="Hint.TLabel", justify="left").pack(anchor="w", pady=8)
+        fields = ttk.Frame(config)
+        fields.pack(anchor="w")
+        for index, (text, attr) in enumerate((("警告する残量", "ent_warn"), ("緊急通知する残量", "ent_crit"))):
+            ttk.Label(fields, text=text).grid(row=index, column=0, sticky="w", pady=6)
+            entry = ttk.Entry(fields, width=6)
+            entry.grid(row=index, column=1, padx=12)
+            ttk.Label(fields, text="%").grid(row=index, column=2)
+            setattr(self, attr, entry)
+        ttk.Button(config, text="通知設定を保存", command=self.save_thresholds).pack(anchor="w", pady=12)
         self._sync_threshold_entries()
+        ttk.Separator(config).pack(fill="x", pady=12)
+        ttk.Label(config, text="Windows起動時の動作", font=("Yu Gothic UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(config, text="有効にするとトレイに常駐します。", style="Hint.TLabel").pack(anchor="w", pady=8)
+        self.btn_auto = ttk.Button(config, text="", command=self.toggle_autostart)
+        self.btn_auto.pack(anchor="w")
+        self._sync_autostart_btn()
 
     def save_thresholds(self) -> None:
         err = settings.save(self.ent_warn.get(), self.ent_crit.get())
@@ -200,9 +261,9 @@ class App(tk.Tk):
         p_used = float(pri.get("used_percent") or 0)
         s_used = float(sec.get("used_percent") or 0)
 
-        self.cx_info.config(text=f"sessions {codex['files']} (tokenあり {codex['sessions_with_tokens']}) plan={plan}")
+        self.cx_info.config(text=f"Codex：履歴 {codex['files']}件 / トークン記録 {codex['sessions_with_tokens']}件 / プラン {plan}")
         self.cx_tok.config(
-            text=f"in {m.fmt_num(codex['input'])} / out {m.fmt_num(codex['output'])} / total {m.fmt_num(codex['total'])}"
+            text=f"入力 {m.fmt_num(codex['input'])} / 出力 {m.fmt_num(codex['output'])} / 合計 {m.fmt_num(codex['total'])}"
         )
         if codex.get("has_rate"):
             self.bar5["value"] = 100 - p_used
@@ -229,9 +290,9 @@ class App(tk.Tk):
             self.barCtx["value"] = 0
             self.lblCtx.config(text="-")
 
-        self.cl_info.config(text=f"transcripts {claude['files']} messages {claude['messages']} (履歴は自動消去済)")
+        self.cl_info.config(text=f"Claude：履歴 {claude['files']}件 / メッセージ {claude['messages']}件（履歴の自動削除により参考値）")
         self.cl_tok.config(
-            text=f"in {m.fmt_num(claude['input'])} / out {m.fmt_num(claude['output'])} / total {m.fmt_num(claude['total'])}"
+            text=f"入力 {m.fmt_num(claude['input'])} / 出力 {m.fmt_num(claude['output'])} / 合計 {m.fmt_num(claude['total'])}"
         )
         oauth = claude.get("oauth", {}) or {}
         cl5 = clw = None
@@ -381,7 +442,7 @@ class App(tk.Tk):
 
         c = self.chart
         c.delete("all")
-        W, H, pad_l, pad_b, panels = 440, 230, 34, 16, [("Codex", "codex_5h", "#22c55e"),
+        W, H, pad_l, pad_b, panels = max(440, c.winfo_width()), 230, 34, 16, [("Codex", "codex_5h", "#22c55e"),
                                                         ("Claude", "claude_5h", "#3b82f6")]
         ph = (H - pad_b) // 2
         for idx, (name, metric, color) in enumerate(panels):
