@@ -184,12 +184,12 @@ class App(tk.Tk):
         content_height = canvas.bbox("all")[3]
         chrome_height = self.winfo_height() - canvas.winfo_height()
         height = min(content_height + chrome_height + 24, self.winfo_screenheight() - 80)
-        self.geometry(f"600x{height}")
+        self.geometry(f"{self.overview_width}x{height}")
         self.update_idletasks()
         content_height = canvas.bbox("all")[3]
         chrome_height = self.winfo_height() - canvas.winfo_height()
         height = min(content_height + chrome_height + 24, self.winfo_screenheight() - 80)
-        self.geometry(f"600x{height}+40+40")
+        self.geometry(f"{self.overview_width}x{height}+40+40")
         for label in labels:
             label.config(text="読み込み中…")
         self.cl_models.configure(text="")
@@ -266,12 +266,23 @@ class App(tk.Tk):
             label.bar = bar
             return bar, label
 
-        cx = ttk.LabelFrame(overview, text="Codex", padding=10)
-        cx.pack(fill="x", pady=(8, 4))
+        providers = ttk.Frame(overview)
+        providers.pack(fill="x")
+        compact = self.winfo_screenheight() < 900
+        self.overview_width = min(1000, self.winfo_screenwidth() - 80) if compact else 600
+        cx = ttk.LabelFrame(providers, text="Codex", padding=10)
+        if compact:
+            providers.columnconfigure((0, 1), weight=1, uniform="provider")
+            cx.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=8)
+        else:
+            cx.pack(fill="x", pady=(8, 4))
         self.bar5, self.lbl5 = window(cx, "5時間の利用枠")
         self.barW, self.lblW = window(cx, "週間の利用枠")
-        cl = ttk.LabelFrame(overview, text="Claude", padding=10)
-        cl.pack(fill="x", pady=4)
+        cl = ttk.LabelFrame(providers, text="Claude", padding=10)
+        if compact:
+            cl.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=8)
+        else:
+            cl.pack(fill="x", pady=4)
         self.cl_bar5, self.cl_lbl5 = window(cl, "5時間の利用枠")
         self.cl_barW, self.cl_lblW = window(cl, "週間の利用枠")
         self.cl_models = ttk.Label(cl, text="", style="Hint.TLabel")
