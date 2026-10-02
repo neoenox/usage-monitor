@@ -61,3 +61,17 @@ def test_remaining_text_separates_value_and_reset():
 
 def test_remaining_text_preserves_unavailable_reason():
     assert gui.remaining_text("未連携: ログインしてください") == ("", "未連携: ログインしてください")
+
+
+def test_quota_state_uses_configured_thresholds():
+    cfg = {"warn_at": 30, "crit_at": 15}
+    assert gui.quota_state(31, cfg)[0] == "余裕あり"
+    assert gui.quota_state(30, cfg)[0] == "注意"
+    assert gui.quota_state(15, cfg)[0] == "残量わずか"
+    assert gui.quota_state(0, cfg)[0] == "残量わずか"
+
+
+def test_freshness_uses_completed_update_age():
+    assert gui.freshness_text(59) == "最終更新：たった今"
+    assert gui.freshness_text(60) == "最終更新：1分前"
+    assert gui.freshness_text(121) == "最終更新：2分前"

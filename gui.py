@@ -72,13 +72,30 @@ def remaining_text(text: str) -> tuple[str, str]:
     return headline, detail
 
 
+def quota_state(left: float, cfg: dict) -> tuple[str, str]:
+    if left <= cfg["crit_at"]:
+        return "残量わずか", "#b91c1c"
+    if left <= cfg["warn_at"]:
+        return "注意", "#92400e"
+    return "余裕あり", "#166534"
+
+
+def freshness_text(elapsed: float) -> str:
+    minutes = max(0, int(elapsed // 60))
+    return "最終更新：たった今" if minutes == 0 else f"最終更新：{minutes}分前"
+
+
 class RemainingLabel(ttk.Frame):
     """Quota label compatible with the existing render and countdown updates."""
 
     def __init__(self, parent):
         super().__init__(parent)
-        self.value = ttk.Label(self, style="Remaining.TLabel")
-        self.value.pack(anchor="w")
+        self.heading = ttk.Frame(self)
+        self.heading.pack(fill="x")
+        self.value = ttk.Label(self.heading, style="Remaining.TLabel")
+        self.value.pack(side="left")
+        self.badge = ttk.Label(self.heading)
+        self.badge.pack(side="left", padx=12)
         self.detail = ttk.Label(self, justify="left", style="Hint.TLabel")
         self.detail.pack(fill="x")
         self.bind("<Configure>", lambda event: self.detail.configure(wraplength=max(100, event.width)))
@@ -93,9 +110,15 @@ class RemainingLabel(ttk.Frame):
         headline, detail = remaining_text(text)
         self.value.configure(text=headline)
         if headline:
-            self.value.pack(anchor="w", before=self.detail)
+            self.heading.pack(fill="x", before=self.detail)
+            state, color = quota_state(float(headline.split()[1][:-1]), settings.load())
+            self.badge.configure(text=state, foreground=color)
+            if hasattr(self, "bar"):
+                self.bar.configure(style=f"{state}.Horizontal.TProgressbar")
         else:
-            self.value.pack_forget()
+            self.heading.pack_forget()
+            if hasattr(self, "bar"):
+                self.bar.configure(style="Unavailable.Horizontal.TProgressbar")
         self.detail.configure(text=detail)
 
 
@@ -154,6 +177,9 @@ class App(tk.Tk):
     def _build(self) -> None:
         self.minsize(520, 640)
         style = ttk.Style(self)
+        style.theme_use("clam")
+        for name, color in (("余裕あり", "#166534"), ("注意", "#b45309"), ("残量わずか", "#b91c1c"), ("Unavailable", "#6b7280")):
+            style.configure(f"{name}.Horizontal.TProgressbar", background=color)
         style.configure("Remaining.TLabel", font=("Yu Gothic UI", 20, "bold"))
         style.configure("Title.TLabel", font=("Yu Gothic UI", 16, "bold"))
         style.configure("Hint.TLabel", foreground="#555555")
@@ -165,7 +191,9 @@ class App(tk.Tk):
         self.btn_refresh = ttk.Button(header, text="最新情報に更新", command=self.refresh)
         self.btn_refresh.pack(side="right")
         self.status = ttk.Label(root, text="", style="Hint.TLabel", wraplength=480)
-        self.status.pack(anchor="w", pady=(0, 8))
+        self.status.pack(anchor="w", pady=(0, 4))
+        self.freshness = ttk.Label(root, text="最終更新：未取得", style="Hint.TLabel")
+        self.freshness.pack(anchor="w", pady=(0, 8))
         tabs = ttk.Notebook(root)
         tabs.pack(fill="both", expand=True)
         overview_page = ttk.Frame(tabs)
@@ -195,6 +223,7 @@ class App(tk.Tk):
             label.pack(fill="x")
             bar = ttk.Progressbar(row, maximum=100)
             bar.pack(fill="x", pady=(4, 0))
+            label.bar = bar
             return bar, label
 
         cx = ttk.LabelFrame(overview, text="Codex", padding=10)
@@ -257,6 +286,8 @@ class App(tk.Tk):
         else:
             self.status.config(text="閾値を保存しました")
             self._sync_threshold_entries()
+            for label in (self.lbl5, self.lblW, self.cl_lbl5, self.cl_lblW):
+                label.config(text=label.cget("text"))
 
     def _sync_threshold_entries(self) -> None:
         cfg = settings.load()
@@ -376,9 +407,11 @@ class App(tk.Tk):
             pass
         self._draw_chart()
 
-        from datetime import datetime
+        import time
 
-        self.status.config(text=f"更新: {datetime.now().strftime('%H:%M:%S')}")
+        self._updated_at = time.monotonic()
+        self.freshness.config(text=freshness_text(0))
+        self.status.config(text="更新しました")
         if getattr(self, "tray", None):
             self.tray.update_from(codex, claude)
         self._schedule_tick()
@@ -418,6 +451,9 @@ class App(tk.Tk):
     def _tick(self) -> None:
         """1分毎にcountdown・ペース部分だけ更新。"""
         self._tick_job = None
+        if hasattr(self, "_updated_at"):
+            import time
+            self.freshness.config(text=freshness_text(time.monotonic() - self._updated_at))
         if not hasattr(self, "_last"):
             self._schedule_tick()
             return

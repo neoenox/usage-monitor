@@ -229,3 +229,25 @@ def test_initial_size_shows_all_overview_without_scrolling(app):
     assert bottom <= app.overview_canvas.winfo_rooty() + app.overview_canvas.winfo_height()
     assert app.winfo_y() + app.winfo_height() <= app.winfo_screenheight()
     app.withdraw()
+
+
+def test_quota_badges_and_bars_follow_thresholds(app, monkeypatch):
+    import settings
+    monkeypatch.setattr(settings, "load", lambda: {"warn_at": 30, "crit_at": 15})
+    for left, state in ((80, "余裕あり"), (30, "注意"), (15, "残量わずか")):
+        app.lbl5.config(text=f"5h 残り{left}% (使用{100-left}%) reset=14:00 (4時間) [予測]")
+        app.update_idletasks()
+        assert app.lbl5.badge.cget("text") == state
+        assert app.bar5.cget("style") == f"{state}.Horizontal.TProgressbar"
+    app.lbl5.config(text="未連携")
+    app.update_idletasks()
+    assert app.lbl5.heading.winfo_manager() == ""
+    assert app.bar5.cget("style") == "Unavailable.Horizontal.TProgressbar"
+
+
+def test_update_age_ticks_without_codex_data(app, monkeypatch):
+    monkeypatch.setattr(time, "monotonic", lambda: 180)
+    app._updated_at = 60
+    app._last = ({"has_rate": False}, {})
+    app._tick()
+    assert app.freshness.cget("text") == "最終更新：2分前"
