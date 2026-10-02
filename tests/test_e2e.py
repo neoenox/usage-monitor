@@ -159,7 +159,7 @@ def test_gui_oauth_ok_and_stale_labels(app):
     app._render(codex, claude_ok)
     app.update_idletasks()
     assert "残り80%" in app.cl_lbl5.cget("text")
-    assert "セーフ" in app.cl_lbl5.cget("text")
+    assert "履歴不足で予測できません" in app.cl_lbl5.cget("text")
     # stale: リセット時刻が過去なら新窓扱いになる
     codex["rate_limits"]["primary"]["resets_at"] = 1000000000
     app._render(codex, claude_ok)
@@ -200,3 +200,54 @@ def test_daily_report_once_per_day(tmp_path, monkeypatch):
     assert "Codex 5h最大99%" in fake.balloons[0][1]
     ctl._maybe_daily_report(codex, claude)
     assert len(fake.balloons) == 1  # 同日は再通知しない
+
+
+def test_overview_scroll_reaches_last_quota(app):
+    app.deiconify()
+    app.geometry("520x640")
+    for label in (app.lbl5, app.lblW, app.cl_lbl5, app.cl_lblW):
+        label.config(text="5h 残り80% (使用20%) reset=14:00 (4時間) [余裕あり]")
+    app.update()
+    app.overview_canvas.yview_moveto(1.0)
+    app.update()
+    bottom = app.cl_barW.winfo_rooty() + app.cl_barW.winfo_height()
+    viewport_bottom = app.overview_canvas.winfo_rooty() + app.overview_canvas.winfo_height()
+    assert bottom <= viewport_bottom
+    assert app.lbl5.value.cget("text") == "残り 80%"
+    app.withdraw()
+
+
+def test_initial_size_shows_all_overview_without_scrolling(app):
+    app.deiconify()
+    app._fit_overview()
+    for label in (app.lbl5, app.lblW, app.cl_lbl5, app.cl_lblW):
+        label.config(text="5h 残り80% (使用20%) reset=10/02 14:00 (4時間) [現在のペースで継続可能]")
+    app.cl_models.config(text="Opus週使用10% / Sonnet週使用20%")
+    app.update()
+    assert app.overview_canvas.yview()[0] == 0
+    bottom = app.cl_models.winfo_rooty() + app.cl_models.winfo_height()
+    assert bottom <= app.overview_canvas.winfo_rooty() + app.overview_canvas.winfo_height()
+    assert app.winfo_y() + app.winfo_height() <= app.winfo_screenheight()
+    app.withdraw()
+
+
+def test_quota_badges_and_bars_follow_thresholds(app, monkeypatch):
+    import settings
+    monkeypatch.setattr(settings, "load", lambda: {"warn_at": 30, "crit_at": 15})
+    for left, state in ((80, "余裕あり"), (30, "注意"), (15, "残量わずか")):
+        app.lbl5.config(text=f"5h 残り{left}% (使用{100-left}%) reset=14:00 (4時間) [予測]")
+        app.update_idletasks()
+        assert app.lbl5.badge.cget("text") == state
+        assert app.bar5.cget("style") == f"{state}.Horizontal.TProgressbar"
+    app.lbl5.config(text="未連携")
+    app.update_idletasks()
+    assert app.lbl5.heading.winfo_manager() == ""
+    assert app.bar5.cget("style") == "Unavailable.Horizontal.TProgressbar"
+
+
+def test_update_age_ticks_without_codex_data(app, monkeypatch):
+    monkeypatch.setattr(time, "monotonic", lambda: 180)
+    app._updated_at = 60
+    app._last = ({"has_rate": False}, {})
+    app._tick()
+    assert app.freshness.cget("text") == "最終更新：2分前"
