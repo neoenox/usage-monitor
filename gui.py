@@ -72,6 +72,44 @@ def remaining_text(text: str) -> tuple[str, str]:
     return headline, detail
 
 
+def quota_forecast(used, window_min, reset_epoch, hist=(), show_date=True) -> str:
+    """Explain a forecast only when comparable samples establish a recent rate."""
+    import math
+    import time
+
+    now = time.time()
+    try:
+        used, reset_epoch = float(used), float(reset_epoch)
+        if not math.isfinite(used) or not math.isfinite(reset_epoch) or window_min <= 0:
+            return "データ不足で予測できません"
+    except (TypeError, ValueError):
+        return "データ不足で予測できません"
+    if reset_epoch <= now:
+        return "リセット後のデータを待っています"
+    if used >= 100:
+        return "利用上限に達しています"
+    start = reset_epoch - window_min * 60
+    points = sorted((t, u) for t, u in hist if start <= t <= now)
+    if len(points) < 2 or points[-1][0] - points[0][0] < 600:
+        return "履歴不足で予測できません"
+    delta = points[-1][1] - points[0][1]
+    if any(b[1] < a[1] for a, b in zip(points, points[1:])) or used < points[-1][1]:
+        return "履歴不足で予測できません"
+    if delta == 0:
+        return "リセットまで持つ見込み"
+    rate = delta / (points[-1][0] - points[0][0])
+    hit = points[-1][0] + (100 - used) / rate
+    if hit >= reset_epoch:
+        return "リセットまで持つ見込み"
+    if hit <= now:
+        return "上限に達する見込み（予測時刻を経過）"
+    minutes = max(1, math.ceil((hit - now) / 60))
+    days, rest = divmod(minutes, 1440)
+    hours, minutes = divmod(rest, 60)
+    duration = (f"{days}日" if days else "") + (f"{hours}時間" if hours else "") + (f"{minutes}分" if minutes else "")
+    return f"約{duration}後に上限へ達する見込み"
+
+
 def quota_state(left: float, cfg: dict) -> tuple[str, str]:
     if left <= cfg["crit_at"]:
         return "残量わずか", "#b91c1c"
@@ -324,13 +362,12 @@ class App(tk.Tk):
             self.bar5["value"] = 100 - p_used
             self.lbl5.config(text=self._codex_label(
                 "5h", p_used, pri.get("resets_at"), m.fmt_ts,
-                m.pace_label(p_used, 300, pri.get("resets_at"), h.recent("codex_5h"), False),
+                quota_forecast(p_used, 300, pri.get("resets_at"), h.recent("codex_5h"), False),
                 codex.get("new_window_5h", False)))
             self.barW["value"] = 100 - s_used
             self.lblW.config(text=self._codex_label(
                 "週", s_used, sec.get("resets_at"), m.fmt_ts,
-                m.pace_label(s_used, 10080, sec.get("resets_at"), h.recent("codex_wk"))
-                + f" <{m.week_pace(s_used, 10080, sec.get('resets_at'))}>",
+                quota_forecast(s_used, 10080, sec.get("resets_at"), h.recent("codex_wk")),
                 codex.get("new_window_wk", False)))
         else:
             self.bar5["value"] = 0
@@ -365,10 +402,9 @@ class App(tk.Tk):
                 win_min = 300 if key == "five_hour" else 10080
                 hist_key = "claude_5h" if key == "five_hour" else "claude_wk"
                 flag = "new_window_5h" if key == "five_hour" else "new_window_wk"
-                pace = m.pace_label(used, win_min, m.iso_to_epoch(w.get("resets_at")),
+                pace = quota_forecast(used, win_min, m.iso_to_epoch(w.get("resets_at")),
                                     h.recent(hist_key), show_date=(key != "five_hour"))
-                extra = (f" <{m.week_pace(used, 10080, m.iso_to_epoch(w.get('resets_at')))}>"
-                         if key == "seven_day" else "")
+                extra = ""
                 if claude.get(flag):
                     extra += "（新窓）"
                 lbl.config(text=f"{tag} 残り{100 - used:.0f}% (使用{used:.0f}%) "
@@ -468,12 +504,11 @@ class App(tk.Tk):
             pu, su = float(pri.get("used_percent") or 0), float(sec.get("used_percent") or 0)
             self.lbl5.config(text=self._codex_label(
                 "5h", pu, pri.get("resets_at"), m.fmt_ts,
-                m.pace_label(pu, 300, pri.get("resets_at"), h.recent("codex_5h"), False),
+                quota_forecast(pu, 300, pri.get("resets_at"), h.recent("codex_5h"), False),
                 codex.get("new_window_5h", False)))
             self.lblW.config(text=self._codex_label(
                 "週", su, sec.get("resets_at"), m.fmt_ts,
-                m.pace_label(su, 10080, sec.get("resets_at"), h.recent("codex_wk"))
-                + f" <{m.week_pace(su, 10080, sec.get('resets_at'))}>",
+                quota_forecast(su, 10080, sec.get("resets_at"), h.recent("codex_wk")),
                 codex.get("new_window_wk", False)))
         except (TypeError, ValueError):
             pass
@@ -485,10 +520,9 @@ class App(tk.Tk):
                 w = oauth.get(key, {}) or {}
                 try:
                     used = float(w.get("utilization"))
-                    pace = m.pace_label(used, win_min, m.iso_to_epoch(w.get("resets_at")),
+                    pace = quota_forecast(used, win_min, m.iso_to_epoch(w.get("resets_at")),
                                         h.recent(hist_key), show_date=(key != "five_hour"))
-                    extra = (f" <{m.week_pace(used, 10080, m.iso_to_epoch(w.get('resets_at')))}>"
-                             if key == "seven_day" else "")
+                    extra = ""
                     if claude.get(flag):
                         extra += "（新窓）"
                     lbl.config(text=f"{tag} 残り{100 - used:.0f}% (使用{used:.0f}%) "

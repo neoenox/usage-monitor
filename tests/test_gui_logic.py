@@ -75,3 +75,23 @@ def test_freshness_uses_completed_update_age():
     assert gui.freshness_text(59) == "最終更新：たった今"
     assert gui.freshness_text(60) == "最終更新：1分前"
     assert gui.freshness_text(121) == "最終更新：2分前"
+
+
+def test_quota_forecast_requires_same_window_history(monkeypatch):
+    import time
+    monkeypatch.setattr(time, "time", lambda: 20000)
+    assert gui.quota_forecast(20, 300, 25000) == "履歴不足で予測できません"
+    assert gui.quota_forecast(20, 300, None) == "データ不足で予測できません"
+    assert gui.quota_forecast(20, 300, 25000, [(1000, 0), (20000, 20)]) == "履歴不足で予測できません"
+    assert gui.quota_forecast(20, 300, 25000, [(19700, 10), (20000, 20)]) == "履歴不足で予測できません"
+
+
+def test_quota_forecast_distinguishes_safe_and_exhaustion(monkeypatch):
+    import time
+    monkeypatch.setattr(time, "time", lambda: 20000)
+    assert gui.quota_forecast(20, 300, 25000, [(18800, 10), (20000, 20)]) == "リセットまで持つ見込み"
+    assert gui.quota_forecast(50, 300, 25000, [(18800, 0), (20000, 50)]) == "約20分後に上限へ達する見込み"
+    assert gui.quota_forecast(20, 300, 25000, [(18800, 20), (20000, 20)]) == "リセットまで持つ見込み"
+    assert gui.quota_forecast(100, 300, 25000) == "利用上限に達しています"
+    assert gui.quota_forecast(20, 300, 19000) == "リセット後のデータを待っています"
+    assert gui.quota_forecast(20, 300, 25000, [(18800, 30), (20000, 20)]) == "履歴不足で予測できません"
