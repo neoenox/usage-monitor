@@ -508,7 +508,7 @@ class App(tk.Tk):
             return
         codex, claude = self._last
         if not codex.get("has_rate"):
-            self.after(60 * 1000, self._tick)
+            self._schedule_tick()
             return
         rl = codex.get("rate_limits", {}) or {}
         pri = rl.get("primary", {}) or {}
