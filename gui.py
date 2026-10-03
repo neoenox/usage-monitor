@@ -92,13 +92,18 @@ def quota_forecast(used, window_min, reset_epoch, hist=(), show_date=True) -> st
     points = sorted((t, u) for t, u in hist if start <= t <= now)
     if len(points) < 2 or points[-1][0] - points[0][0] < 600:
         return "履歴不足で予測できません"
-    delta = points[-1][1] - points[0][1]
     if any(b[1] < a[1] for a, b in zip(points, points[1:])) or used < points[-1][1]:
         return "履歴不足で予測できません"
+    # Treat the current snapshot as the newest observation before deciding
+    # that usage is flat. This also recovers from historical bogus 0% samples.
+    if now > points[-1][0] and used > points[-1][1]:
+        points.append((now, used))
+    delta = points[-1][1] - points[0][1]
     if delta == 0:
         return "リセットまで持つ見込み"
     rate = delta / (points[-1][0] - points[0][0])
-    hit = points[-1][0] + (100 - used) / rate
+    # The remaining quota belongs to the current snapshot, so forecast from now.
+    hit = now + (100 - used) / rate
     if hit >= reset_epoch:
         return "リセットまで持つ見込み"
     if hit <= now:
@@ -109,6 +114,27 @@ def quota_forecast(used, window_min, reset_epoch, hist=(), show_date=True) -> st
     duration = (f"{days}日" if days else "") + (f"{hours}時間" if hours else "") + (f"{minutes}分" if minutes else "")
     return f"約{duration}後に上限へ達する見込み"
 
+
+
+def history_snapshot(codex: dict, p_used: float, s_used: float,
+                     cl5: float | None = None, clw: float | None = None,
+                     pri: dict | None = None, sec: dict | None = None
+                     ) -> tuple[dict[str, float], dict[str, int | None]]:
+    """Build only history samples that were actually observed."""
+    metrics: dict[str, float] = {}
+    resets: dict[str, int | None] = {}
+    if codex.get("has_rate"):
+        metrics.update({"codex_5h": p_used, "codex_wk": s_used})
+        pri, sec = pri or {}, sec or {}
+        resets.update({
+            "codex_5h": pri.get("resets_at"),
+            "codex_wk": sec.get("resets_at"),
+        })
+    if cl5 is not None:
+        metrics["claude_5h"] = cl5
+    if clw is not None:
+        metrics["claude_wk"] = clw
+    return metrics, resets
 
 def quota_state(left: float, cfg: dict) -> tuple[str, str]:
     if left <= cfg["crit_at"]:
@@ -445,13 +471,9 @@ class App(tk.Tk):
 
         # 履歴記録＋グラフ
         try:
-            metrics = {"codex_5h": p_used, "codex_wk": s_used}
-            resets = {"codex_5h": pri.get("resets_at"), "codex_wk": sec.get("resets_at")}
-            if cl5 is not None:
-                metrics["claude_5h"] = cl5
-            if clw is not None:
-                metrics["claude_wk"] = clw
-            h.record(metrics, resets)
+            metrics, resets = history_snapshot(codex, p_used, s_used, cl5, clw, pri, sec)
+            if metrics:
+                h.record(metrics, resets)
         except Exception:
             pass
         self._draw_chart()
