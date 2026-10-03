@@ -92,16 +92,15 @@ def quota_forecast(used, window_min, reset_epoch, hist=(), show_date=True) -> st
     points = sorted((t, u) for t, u in hist if start <= t <= now)
     if len(points) < 2 or points[-1][0] - points[0][0] < 600:
         return "履歴不足で予測できません"
-    delta = points[-1][1] - points[0][1]
     if any(b[1] < a[1] for a, b in zip(points, points[1:])) or used < points[-1][1]:
         return "履歴不足で予測できません"
-    if delta == 0:
-        return "リセットまで持つ見込み"
-    # Treat the current snapshot as the newest observation when usage advanced.
-    # This avoids letting stale/invalid historical 0% samples dominate the slope.
+    # Treat the current snapshot as the newest observation before deciding
+    # that usage is flat. This also recovers from historical bogus 0% samples.
     if now > points[-1][0] and used > points[-1][1]:
         points.append((now, used))
-        delta = points[-1][1] - points[0][1]
+    delta = points[-1][1] - points[0][1]
+    if delta == 0:
+        return "リセットまで持つ見込み"
     rate = delta / (points[-1][0] - points[0][0])
     # The remaining quota belongs to the current snapshot, so forecast from now.
     hit = now + (100 - used) / rate
