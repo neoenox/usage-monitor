@@ -77,6 +77,26 @@ def test_fmt_countdown_invalid():
     assert m.fmt_countdown("xx") == "-"
 
 
+def test_week_budget():
+    now = int(time.time())
+    reset = now + 4 * 86400  # 残り4日
+    assert m.week_budget(40.0, reset) == "1日15%まで"  # 残り60%/4日
+    assert m.week_budget(None, reset) == "-"
+    assert m.week_budget(40.0, None) == "-"
+    assert m.week_budget(100.0, reset) == "予算なし(上限到達)"
+    assert m.week_budget(40.0, now - 10) == "まもなくリセット"
+    # 残り1日未満はキープ表示
+    assert m.week_budget(90.0, now + 12 * 3600) == "残り10%をキープ"
+
+
+def test_week_status_has_no_short_term_forecast():
+    now = int(time.time())
+    reset = now + 4 * 86400
+    s = m.week_status(40.0, reset)
+    assert "枯渇" not in s and "セーフ" not in s
+    assert "pace" in s and "1日" in s
+
+
 def test_scan_codex_sums_last_per_file(codex_data):
     assert codex_data["files"] == 2
     assert codex_data["sessions_with_tokens"] == 2
