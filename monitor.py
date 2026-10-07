@@ -284,9 +284,9 @@ def scan_codex(home: Path) -> dict:
             total_cached += int(last_usage.get("cached_input_tokens") or 0)
     # レート制限は「全ファイル中の最新token_countイベント」を採用。
     # mtime順では複数セッションが交互追記されると古い値を掴むため、
-    # イベントtimestamp(ISO)の最大で選ぶ。primaryがdictでない行は除外。
+    # イベントtimestampをepochへ正規化して選ぶ。primaryがdictでない行は除外。
     latest_rl = None
-    latest_rl_ts = ""
+    latest_rl_epoch = None
     latest_rl_file = ""
     for f in files:
         try:
@@ -302,9 +302,18 @@ def scan_codex(home: Path) -> dict:
                     rl = payload.get("rate_limits") if isinstance(payload, dict) else None
                     if not isinstance(rl, dict) or not isinstance(rl.get("primary"), dict):
                         continue
-                    ts = str(d.get("timestamp", ""))
-                    if ts >= latest_rl_ts:
-                        latest_rl_ts = ts
+                    ts = d.get("timestamp")
+                    if not ts:
+                        # Keep the legacy fallback if no dated event is available.
+                        if latest_rl_epoch is None:
+                            latest_rl = rl
+                            latest_rl_file = f.name
+                        continue
+                    ts_epoch = iso_to_epoch(str(ts))
+                    if ts_epoch is None:
+                        continue
+                    if latest_rl_epoch is None or ts_epoch >= latest_rl_epoch:
+                        latest_rl_epoch = ts_epoch
                         latest_rl = rl
                         latest_rl_file = f.name
         except Exception:
