@@ -178,6 +178,54 @@ def test_newest_event_wins_over_mtime(tmp_path):
     assert out["rate_limits"]["secondary"]["used_percent"] == 54.0
 
 
+def test_rate_limit_timestamps_use_instant_order(tmp_path):
+    """ISO offsets must not change which rate-limit event is newest."""
+    import json as _json
+
+    folder = tmp_path / ".codex" / "sessions"
+    folder.mkdir(parents=True)
+
+    def rate_event(ts, used):
+        return _json.dumps({
+            "timestamp": ts,
+            "type": "event_msg",
+            "payload": {"rate_limits": {"primary": {"used_percent": used}}},
+        })
+
+    # 09:00+02:00 is 07:00 UTC and is older than 08:00Z.
+    # Lexicographic comparison incorrectly chooses the first timestamp.
+    (folder / "a.jsonl").write_text(
+        rate_event("2026-09-30T08:00:00Z", 80.0) + "\n",
+        encoding="utf-8",
+    )
+    (folder / "b.jsonl").write_text(
+        rate_event("2026-09-30T09:00:00+02:00", 10.0) + "\n"
+        + rate_event("not-an-iso-timestamp", 99.0) + "\n"
+        + _json.dumps({"type": "event_msg", "payload": {
+            "rate_limits": {"primary": {"used_percent": 5.0}},
+        }}) + "\n",
+        encoding="utf-8",
+    )
+    result = m.scan_codex(tmp_path)
+    assert result["rate_limits"]["primary"]["used_percent"] == 80.0
+    assert result["rate_source"] == "a.jsonl"
+
+
+def test_rate_limit_without_timestamp_keeps_legacy_fallback(tmp_path):
+    """Undated events still provide a fallback if there are no dated ones."""
+    import json as _json
+
+    folder = tmp_path / ".codex" / "sessions"
+    folder.mkdir(parents=True)
+    def event(used):
+        return _json.dumps({"type": "event_msg", "payload": {
+            "rate_limits": {"primary": {"used_percent": used}},
+        }})
+    (folder / "a.jsonl").write_text(event(10) + "\n" + event(20) + "\n", encoding="utf-8")
+    result = m.scan_codex(tmp_path)
+    assert result["rate_limits"]["primary"]["used_percent"] == 20
+
+
 def test_is_stale():
     import time as _time
 
