@@ -163,6 +163,38 @@ def week_pace(used: float | None, window_min: int, reset_epoch: int | None) -> s
     return f"on pace (経過{expected:.0f}%/使用{used:.0f}%)"
 
 
+def week_budget(used: float | None, reset_epoch: int | None) -> str:
+    """週窓のburn-down予算: 残量を残り日数で割った「1日あたり使える%」。
+    短期ペース(枯渇予測)の代わりに週窓用として使う。"""
+    import time
+
+    try:
+        used = float(used) if used is not None else None
+        reset_epoch = int(float(reset_epoch))
+    except (TypeError, ValueError):
+        return "-"
+    if used is None:
+        return "-"
+    left = 100.0 - used
+    if left <= 0:
+        return "予算なし(上限到達)"
+    now = int(time.time())
+    remaining = reset_epoch - now
+    if remaining <= 0:
+        return "まもなくリセット"
+    if remaining < 3600:
+        return f"残り{left:.0f}%をキープ"
+    days = remaining / 86400
+    if days < 1:
+        return f"残り{left:.0f}%をキープ"
+    return f"1日{left / days:.0f}%まで"
+
+
+def week_status(used: float | None, reset_epoch: int | None) -> str:
+    """週窓の一本化表示: week_pace + 日次予算。"""
+    return f"{week_pace(used, 10080, reset_epoch)}・{week_budget(used, reset_epoch)}"
+
+
 def day_bounds(days_ago: int = 1) -> tuple[int, int]:
     """days_ago日前のローカル日境界 (start, end) をepoch秒で返す。"""
     import time
@@ -619,17 +651,16 @@ def main() -> int:
         s_used = float(sec.get("used_percent") or 0)
         try:
             import history as _h
-            h5, hw = _h.recent("codex_5h"), _h.recent("codex_wk")
+            h5 = _h.recent("codex_5h")
         except Exception:
-            h5, hw = [], []
+            h5 = []
         print(f"  5h      : {100 - p_used:.0f}% left (used {p_used:.0f}%) "
               f"reset={fmt_ts(pri.get('resets_at'))} ({fmt_countdown(pri.get('resets_at'))}) "
               f"[{pace_label(p_used, 300, pri.get('resets_at'), h5, False)}]"
               f"{' (new window)' if codex.get('new_window_5h') else ''}")
         print(f"  weekly  : {100 - s_used:.0f}% left (used {s_used:.0f}%) "
               f"reset={fmt_ts(sec.get('resets_at'))} ({fmt_countdown(sec.get('resets_at'))}) "
-              f"[{pace_label(s_used, 10080, sec.get('resets_at'), hw)}] "
-              f"<{week_pace(s_used, 10080, sec.get('resets_at'))}>")
+              f"<{week_status(s_used, sec.get('resets_at'))}>")
         ctx = codex.get("context", {}) or {}
         if ctx:
             print(f"  context : {ctx['pct']}% ({fmt_num(ctx['input'])}/{fmt_num(ctx['window'])})")
@@ -649,8 +680,11 @@ def main() -> int:
             ch5, chw = _h2.recent("claude_5h"), _h2.recent("claude_wk")
         except Exception:
             ch5, chw = [], []
-        win_min = {"five_hour": 300, "seven_day": 10080}
-        hist_of = {"five_hour": ch5, "seven_day": chw}
+        try:
+            import history as _h2
+            ch5 = _h2.recent("claude_5h")
+        except Exception:
+            ch5 = []
         for label, key in (("5h", "five_hour"), ("weekly", "seven_day"),
                            ("wk-opus", "seven_day_opus"), ("wk-sonnet", "seven_day_sonnet")):
             w = oauth.get(key, {}) or {}
@@ -659,14 +693,16 @@ def main() -> int:
                 continue
             try:
                 left = 100 - float(u)
-                pace = pace_label(float(u), win_min.get(key, 0),
-                                  iso_to_epoch(w.get("resets_at")), hist_of.get(key, []),
-                                  show_date=(key != "five_hour"))
-                extra = ""
-                if key == "seven_day":
-                    extra = f" <{week_pace(float(u), 10080, iso_to_epoch(w.get('resets_at')))}>"
+                reset_ep = iso_to_epoch(w.get("resets_at"))
+                if key == "five_hour":
+                    pace = pace_label(float(u), 300, reset_ep, ch5, False)
+                    extra = f"[{pace}]"
+                elif key == "seven_day":
+                    extra = f"<{week_status(float(u), reset_ep)}>"
+                else:
+                    extra = f"<{week_status(float(u), reset_ep)}>" if w.get("resets_at") else ""
                 print(f"  {label:<8}: {left:.0f}% left (used {float(u):.0f}%) "
-                      f"reset={fmt_ts_iso(w.get('resets_at'))} ({fmt_countdown(w.get('resets_at'))}) [{pace}]{extra}")
+                      f"reset={fmt_ts_iso(w.get('resets_at'))} ({fmt_countdown(w.get('resets_at'))}) {extra}")
             except (TypeError, ValueError):
                 print(f"  {label:<8}: -")
     elif oauth.get("status") == "missing_token":
