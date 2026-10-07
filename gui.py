@@ -406,7 +406,7 @@ class App(tk.Tk):
             self.barW["value"] = 100 - s_used
             self.lblW.config(text=self._codex_label(
                 "週", s_used, sec.get("resets_at"), m.fmt_ts,
-                quota_forecast(s_used, 10080, sec.get("resets_at"), h.recent("codex_wk")),
+                m.week_status(s_used, sec.get("resets_at")),
                 codex.get("new_window_wk", False)))
         else:
             self.bar5["value"] = 0
@@ -438,11 +438,12 @@ class App(tk.Tk):
                     lbl.config(text="-")
                     continue
                 bar["value"] = 100 - used
-                win_min = 300 if key == "five_hour" else 10080
-                hist_key = "claude_5h" if key == "five_hour" else "claude_wk"
                 flag = "new_window_5h" if key == "five_hour" else "new_window_wk"
-                pace = quota_forecast(used, win_min, m.iso_to_epoch(w.get("resets_at")),
-                                    h.recent(hist_key), show_date=(key != "five_hour"))
+                if key == "five_hour":
+                    pace = quota_forecast(used, 300, m.iso_to_epoch(w.get("resets_at")),
+                                        h.recent("claude_5h"), show_date=False)
+                else:
+                    pace = m.week_status(used, m.iso_to_epoch(w.get("resets_at")))
                 extra = ""
                 if claude.get(flag):
                     extra += "（新窓）"
@@ -543,20 +544,23 @@ class App(tk.Tk):
                 codex.get("new_window_5h", False)))
             self.lblW.config(text=self._codex_label(
                 "週", su, sec.get("resets_at"), m.fmt_ts,
-                quota_forecast(su, 10080, sec.get("resets_at"), h.recent("codex_wk")),
+                m.week_status(su, sec.get("resets_at")),
                 codex.get("new_window_wk", False)))
         except (TypeError, ValueError):
             pass
         oauth = claude.get("oauth", {}) or {}
         if oauth.get("status") == "ok":
-            for lbl, key, tag, win_min, hist_key, flag in (
-                    (self.cl_lbl5, "five_hour", "5h", 300, "claude_5h", "new_window_5h"),
-                    (self.cl_lblW, "seven_day", "週", 10080, "claude_wk", "new_window_wk")):
+            for lbl, key, tag, flag in (
+                    (self.cl_lbl5, "five_hour", "5h", "new_window_5h"),
+                    (self.cl_lblW, "seven_day", "週", "new_window_wk")):
                 w = oauth.get(key, {}) or {}
                 try:
                     used = float(w.get("utilization"))
-                    pace = quota_forecast(used, win_min, m.iso_to_epoch(w.get("resets_at")),
-                                        h.recent(hist_key), show_date=(key != "five_hour"))
+                    if key == "five_hour":
+                        pace = quota_forecast(used, 300, m.iso_to_epoch(w.get("resets_at")),
+                                            h.recent("claude_5h"), show_date=False)
+                    else:
+                        pace = m.week_status(used, m.iso_to_epoch(w.get("resets_at")))
                     extra = ""
                     if claude.get(flag):
                         extra += "（新窓）"
