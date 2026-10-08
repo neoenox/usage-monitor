@@ -3,6 +3,24 @@ import pytest
 import claude_export as c
 
 
+def test_interleaved_exports_have_independent_staging(tmp_path, monkeypatch):
+    from pathlib import Path
+    target = tmp_path/'quota.json'
+    replace = Path.replace
+    staged = []
+    def interleave(source, destination):
+        if destination == target:
+            staged.append(source)
+            if len(staged) == 1:
+                c.export({}, target, now=1900000001)
+        return replace(source, destination)
+    monkeypatch.setattr(Path, 'replace', interleave)
+    c.export({}, target, now=1900000000)
+    assert len(set(staged)) == 2
+    assert json.loads(target.read_text())['observed_at'] == 1900000000
+    assert list(tmp_path.iterdir()) == [target]
+
+
 def test_scan_uses_export_without_auth_access(tmp_path, monkeypatch):
     import monitor as m
     target = c.path(tmp_path)

@@ -103,8 +103,10 @@ def _forecast_result(used, window_min, reset_epoch, hist=(), show_date=True) -> 
 
     now = time.time()
     try:
-        used, reset_epoch = float(used), float(reset_epoch)
-        if not math.isfinite(used) or not math.isfinite(reset_epoch) or window_min <= 0:
+        if any(isinstance(v, bool) for v in (used, reset_epoch, window_min)):
+            return "データ不足で予測できません", None
+        used, reset_epoch, window_min = float(used), float(reset_epoch), float(window_min)
+        if not all(math.isfinite(v) for v in (used, reset_epoch, window_min)) or not 0 <= used <= 100 or window_min <= 0:
             return "データ不足で予測できません", None
     except (TypeError, ValueError):
         return "データ不足で予測できません", None
@@ -113,7 +115,16 @@ def _forecast_result(used, window_min, reset_epoch, hist=(), show_date=True) -> 
     if used >= 100:
         return "利用上限に達しています", None
     start = reset_epoch - window_min * 60
-    points = sorted((t, u) for t, u in hist if start <= t <= now)
+    points = []
+    try:
+        for t, u in hist:
+            if any(not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) for v in (t, u)) or not 0 <= u <= 100:
+                return "履歴不足で予測できません", None
+            if start <= t <= now:
+                points.append((t, u))
+        points.sort()
+    except (TypeError, ValueError, OverflowError):
+        return "履歴不足で予測できません", None
     if len(points) < 2 or points[-1][0] - points[0][0] < 600:
         return "履歴不足で予測できません", None
     if any(b[1] < a[1] for a, b in zip(points, points[1:])) or used < points[-1][1]:

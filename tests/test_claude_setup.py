@@ -3,6 +3,28 @@ import pytest
 import claude_setup as s
 
 
+@pytest.mark.parametrize('recovery', ['retry', 'restore'])
+def test_interrupted_install_can_recover(tmp_path, monkeypatch, recovery):
+    target = tmp_path/'settings.json'
+    original = {'theme': 'dark', 'statusLine': {'command': 'old'}}
+    target.write_text(json.dumps(original))
+    writer = s._write
+    def fail_settings(path, data):
+        if path == target:
+            raise OSError('simulated failure')
+        writer(path, data)
+    monkeypatch.setattr(s, '_write', fail_settings)
+    with pytest.raises(OSError):
+        s.install(target, 'export', consent=True, replace_existing=True)
+    assert json.loads(target.read_text()) == original
+    monkeypatch.setattr(s, '_write', writer)
+    if recovery == 'retry':
+        s.install(target, 'export', consent=True, replace_existing=True)
+    s.restore(target)
+    assert json.loads(target.read_text()) == original
+    assert not s._backup(target).exists()
+
+
 def test_no_consent_no_change(tmp_path):
     target = tmp_path/'settings.json'
     with pytest.raises(ValueError):

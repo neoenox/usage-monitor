@@ -33,7 +33,16 @@ def install(target: Path, command: str, *, consent=False, replace_existing=False
     if backup.exists():
         if data.get('statusLine') == status:
             return
-        raise ValueError('保存済みの設定を復元してから再設定してください')
+        record = _load(backup)
+        unchanged = ('statusLine' in data) == record.get('had_statusline') and data.get('statusLine') == record.get('previous')
+        if not unchanged or record.get('installed') != status:
+            raise ValueError('保存済みの設定を復元してから再設定してください')
+        # Previous write failed before installation; keep the original backup.
+        if 'statusLine' in data and not replace_existing:
+            raise ValueError('既存statuslineの置換同意が必要です')
+        data['statusLine'] = status
+        _write(target, data)
+        return
     if 'statusLine' in data and not replace_existing:
         raise ValueError('既存statuslineがあります。明示的な置換同意が必要です')
     _write(backup, {'had_statusline': 'statusLine' in data, 'previous': data.get('statusLine'), 'installed': status})
@@ -47,7 +56,8 @@ def restore(target: Path):
     if not previous:
         raise ValueError('復元用バックアップがありません')
     data = _load(target)
-    if data.get('statusLine') != previous['installed']:
+    unchanged = ('statusLine' in data) == previous['had_statusline'] and data.get('statusLine') == previous['previous']
+    if data.get('statusLine') != previous['installed'] and not unchanged:
         raise ValueError('statuslineが後から変更されています。上書きしません')
     if previous['had_statusline']:
         data['statusLine'] = previous['previous']

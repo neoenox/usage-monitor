@@ -33,9 +33,17 @@ def export(data: dict, target: Path, now: float | None = None) -> None:
             if _number(used) and 0 <= used <= 100 and _number(reset) and reset > 0:
                 result['windows'][key] = {'utilization': float(used), 'resets_at': float(reset)}
     target.parent.mkdir(parents=True, exist_ok=True)
-    temp = target.with_suffix('.tmp')
-    temp.write_text(json.dumps(result, allow_nan=False), encoding='utf-8')
-    temp.replace(target)
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=target.parent,
+                                     prefix=target.name + '.', suffix='.tmp', delete=False) as stream:
+        temp = Path(stream.name)
+        stream.write(json.dumps(result, allow_nan=False))
+    try:
+        temp.replace(target)
+    finally:
+        # Only remove our unique staging file in the verified destination directory.
+        if temp.parent.resolve() == target.parent.resolve():
+            temp.unlink(missing_ok=True)
 
 
 def read(target: Path) -> dict:
