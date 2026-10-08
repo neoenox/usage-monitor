@@ -1,6 +1,6 @@
 # Remaining issue implementation and verification
 
-Status: implementation review in draft PR #39; no merges or issue closures. Local Windows verification at commit 7c7a0e1: 135 tests passed, including actual built executable numeric export, with zero skips. Later setup/documentation changes require a final rerun.
+Status: implementation and verification complete for review in draft PR #39; no merges or issue closures. Local Windows verification at commit 6dfdda2: 137 tests passed, including actual rebuilt executable numeric export, with zero skips. Combined Windows CI (unit/GUI, build, packaged export) and Linux CI passed: https://github.com/neoenox/usage-monitor/actions/runs/37763840067.
 
 ## PR dependency and scope
 
@@ -20,7 +20,7 @@ Status: implementation review in draft PR #39; no merges or issue closures. Loca
 | #25 | CLI/GUI share observed-sample forecast; malformed history cannot crash rendering | `tests/test_forecast_shared.py`, `tests/test_forecast_invalid.py` |
 | #26 | SQLite timeout/WAL from #35 | `tests/test_history_concurrency.py` |
 | #27 | Thresholds normalize to numbers before serialization | `tests/test_settings_roundtrip.py` |
-| #28 | Escaped PowerShell values and Windows argument quoting from #35; real COM test with spaces/Japanese/apostrophe paths | `tests/test_windows_shortcut.py` |
+| #28 | Windows argument quoting from #35; replaced ANSI WScript shortcut interface with native IShellLinkW/IPersistFile after English-runner failure; real COM test with spaces/Japanese/apostrophe paths | `tests/test_windows_shortcut.py` |
 | #29 | RemainingLabel resilience from #35 | `tests/test_gui_logic.py` |
 | #30 | Load alert settings once per alert pass from #35 | GUI/tray regression tests |
 | #31 | Spec already ignored/untracked; README build uses `build.ps1` | `git ls-files '*.spec'` empty; `git check-ignore usage-monitor.spec` succeeds; exe build succeeds |
@@ -39,4 +39,4 @@ Status: implementation review in draft PR #39; no merges or issue closures. Loca
 
 See `DISTRIBUTION.md` for primary sources. Numeric export is not provider endorsement of this standalone monitor. Commercial/hosted Codex distribution eligibility requires confirmation. Do not advertise general commercial release readiness.
 
-Before final completion: finish setup acceptance review, verify fresh combined CI, rerun full tests against latest build, and update PR/issue comments with final evidence. No GitHub merge or automatic closure is authorized.
+Setup acceptance review, final rebuilt suite and combined CI completed. PR/issue evidence records this review state, not merge approval or unrestricted commercial release. No GitHub merge or automatic closure is authorized.
