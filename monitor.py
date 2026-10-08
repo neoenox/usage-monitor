@@ -375,9 +375,11 @@ def scan_codex(home: Path) -> dict:
     files = sorted(base.rglob("*.jsonl")) if base.exists() else []
     total_in = total_out = total_cached = 0
     sessions_with_tokens = 0
-    # レート制限は「mtime最新ファイルの最終token_countイベント」を採用
-    # (コミュニティツールと同方式。timestamp文字列のmax比較は未来日付混入に弱い)
-    newest_with_tokens = None
+    latest_rl = None
+    latest_rl_epoch = None
+    latest_rl_file = ""
+    context: dict = {}
+    latest_ctx_ts = ""
     for f in files:
         last_usage = None
         try:
@@ -387,88 +389,48 @@ def scan_codex(home: Path) -> dict:
                         continue
                     try:
                         d = json.loads(line)
-                    except Exception:
+                    except (ValueError, TypeError):
                         continue
-                    payload = d.get("payload", {}) if isinstance(d, dict) else {}
-                    info = payload.get("info", {}) if isinstance(payload, dict) else {}
+                    if not isinstance(d, dict):
+                        continue
+                    payload = d.get("payload") or {}
+                    if not isinstance(payload, dict):
+                        continue
+                    info = payload.get("info") or {}
+                    if not isinstance(info, dict):
+                        info = {}
                     tu = info.get("total_token_usage") or payload.get("total_token_usage")
                     if isinstance(tu, dict) and "input_tokens" in tu:
                         last_usage = tu
-                        newest_with_tokens = (f, tu)
-        except Exception:
+                    rl = payload.get("rate_limits")
+                    if isinstance(rl, dict) and isinstance(rl.get("primary"), dict):
+                        ts = d.get("timestamp")
+                        epoch = iso_to_epoch(str(ts)) if ts else None
+                        if (not ts and latest_rl_epoch is None) or (epoch is not None and
+                                (latest_rl_epoch is None or epoch >= latest_rl_epoch)):
+                            latest_rl, latest_rl_file = rl, f.name
+                            if epoch is not None:
+                                latest_rl_epoch = epoch
+                    if "token_count" in line:
+                        ts = str(d.get("timestamp", ""))
+                        if ts >= latest_ctx_ts:
+                            last = info.get("last_token_usage") or {}
+                            try:
+                                ctx_in = int(last.get("input_tokens") or 0)
+                                win = int(info.get("model_context_window") or 0)
+                            except (TypeError, ValueError, AttributeError):
+                                continue
+                            if win > 0:
+                                latest_ctx_ts = ts
+                                context = {"input": ctx_in, "window": win,
+                                           "pct": round(ctx_in / win * 100, 1)}
+        except OSError:
             continue
         if last_usage:
             sessions_with_tokens += 1
             total_in += int(last_usage.get("input_tokens") or 0)
             total_out += int(last_usage.get("output_tokens") or 0)
             total_cached += int(last_usage.get("cached_input_tokens") or 0)
-    # レート制限は「全ファイル中の最新token_countイベント」を採用。
-    # mtime順では複数セッションが交互追記されると古い値を掴むため、
-    # イベントtimestampをepochへ正規化して選ぶ。primaryがdictでない行は除外。
-    latest_rl = None
-    latest_rl_epoch = None
-    latest_rl_file = ""
-    for f in files:
-        try:
-            with open(f, encoding="utf-8", errors="ignore") as fh:
-                for line in fh:
-                    if "rate_limits" not in line:
-                        continue
-                    try:
-                        d = json.loads(line)
-                    except Exception:
-                        continue
-                    payload = d.get("payload", {}) if isinstance(d, dict) else {}
-                    rl = payload.get("rate_limits") if isinstance(payload, dict) else None
-                    if not isinstance(rl, dict) or not isinstance(rl.get("primary"), dict):
-                        continue
-                    ts = d.get("timestamp")
-                    if not ts:
-                        # Keep the legacy fallback if no dated event is available.
-                        if latest_rl_epoch is None:
-                            latest_rl = rl
-                            latest_rl_file = f.name
-                        continue
-                    ts_epoch = iso_to_epoch(str(ts))
-                    if ts_epoch is None:
-                        continue
-                    if latest_rl_epoch is None or ts_epoch >= latest_rl_epoch:
-                        latest_rl_epoch = ts_epoch
-                        latest_rl = rl
-                        latest_rl_file = f.name
-        except Exception:
-            continue
-    # contextも全ファイル中の最新token_countイベントから取得
-    context: dict = {}
-    latest_ctx_ts = ""
-    for f in files:
-        try:
-            with open(f, encoding="utf-8", errors="ignore") as fh:
-                for line in fh:
-                    if "token_count" not in line:
-                        continue
-                    try:
-                        d = json.loads(line)
-                    except Exception:
-                        continue
-                    ts = str(d.get("timestamp", ""))
-                    if ts < latest_ctx_ts:
-                        continue
-                    payload = d.get("payload", {}) if isinstance(d, dict) else {}
-                    info = payload.get("info", {}) if isinstance(payload, dict) else {}
-                    last = info.get("last_token_usage") or {}
-                    win = info.get("model_context_window") or 0
-                    try:
-                        ctx_in = int(last.get("input_tokens") or 0)
-                        win = int(win)
-                    except (TypeError, ValueError, AttributeError):
-                        continue
-                    if win > 0:
-                        latest_ctx_ts = ts
-                        context = {"input": ctx_in, "window": win,
-                                   "pct": round(ctx_in / win * 100, 1)}
-        except Exception:
-            continue
     usage_status, usage_detail = "local_history", ""
     if _same_home(home):
         live = fetch_codex_usage(home)
