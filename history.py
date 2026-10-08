@@ -17,8 +17,10 @@ def db_path() -> Path:
 
 def init(path: Path | None = None) -> Path:
     p = path or db_path()
-    con = sqlite3.connect(p)
+    con = sqlite3.connect(p, timeout=10)
     try:
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA busy_timeout=10000")
         con.execute(
             "CREATE TABLE IF NOT EXISTS snapshots("
             "ts INTEGER, metric TEXT, used REAL, resets_at INTEGER)"
@@ -35,7 +37,7 @@ def record(metrics: dict[str, float], resets: dict[str, int | None] | None = Non
     p = init(path)
     now = int(ts or time.time())
     resets = resets or {}
-    con = sqlite3.connect(p)
+    con = sqlite3.connect(p, timeout=10)
     try:
         con.executemany(
             "INSERT INTO snapshots(ts, metric, used, resets_at) VALUES(?,?,?,?)",
@@ -52,7 +54,7 @@ def recent(metric: str, hours: int = 168, path: Path | None = None,
     p = path or db_path()
     if not p.exists():
         return []
-    con = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+    con = sqlite3.connect(f"file:{p}?mode=ro", uri=True, timeout=10)
     try:
         rows = con.execute(
             "SELECT ts, used FROM snapshots WHERE metric=? AND ts>? "
