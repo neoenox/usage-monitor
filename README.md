@@ -59,7 +59,9 @@ python -m pytest tests -q
 
 ## exe化
 
+ビルドは `build.ps1` の引数指定方式に統一する（アイコン付き）。PyInstallerが生成する `*.spec` はローカル生成物として無視し、Gitには追加しない。
+
 ```powershell
 pip install pyinstaller
-python -m PyInstaller --onefile --windowed --name usage-monitor --noconfirm gui.py
+./build.ps1
 ```
