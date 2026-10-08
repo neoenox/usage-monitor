@@ -96,50 +96,60 @@ def fmt_countdown(target) -> str:
     return f"あと{h}時間{m}分" if h else f"あと{m}分"
 
 
-def project_hit(used: float | None, window_min: int, reset_epoch: int | None,
-                 hist: list[tuple[int, float]] | tuple = ()) -> int | None:
-    """このペースで100%に達するepochを予測。窓内に収まる場合のみ返す。
-
-    履歴(同一窓内の2点以上・10分以上の幅)があれば傾きを使用、
-    なければ窓開始→現在の線形で推定。buryな利用のため目安。
-    """
+def _forecast_result(used, window_min, reset_epoch, hist=(), show_date=True) -> tuple[str, int | None]:
+    """Explain a forecast only when comparable samples establish a recent rate."""
+    import math
     import time
 
-    now = int(time.time())
-    if not reset_epoch or window_min <= 0:
-        return None
+    now = time.time()
     try:
-        reset_epoch = int(float(reset_epoch))
+        used, reset_epoch = float(used), float(reset_epoch)
+        if not math.isfinite(used) or not math.isfinite(reset_epoch) or window_min <= 0:
+            return "データ不足で予測できません", None
     except (TypeError, ValueError):
-        return None
+        return "データ不足で予測できません", None
+    if reset_epoch <= now:
+        return "リセット後のデータを待っています", None
+    if used >= 100:
+        return "利用上限に達しています", None
     start = reset_epoch - window_min * 60
-    pts = sorted((int(t), float(u)) for t, u in hist if int(t) >= start)
-    if len(pts) >= 2 and pts[-1][0] - pts[0][0] >= 600 and pts[-1][1] > pts[0][1]:
-        dt = pts[-1][0] - pts[0][0]
-        du = pts[-1][1] - pts[0][1]
-        t_hit = pts[-1][0] + (100 - pts[-1][1]) / du * dt
-    else:
-        if used is None:
-            return None
-        try:
-            used = float(used)
-        except (TypeError, ValueError):
-            return None
-        el = now - start
-        if el <= 60 or used <= 0:
-            return None
-        t_hit = start + 100 / used * el
-    return int(t_hit) if t_hit < reset_epoch else None
+    points = sorted((t, u) for t, u in hist if start <= t <= now)
+    if len(points) < 2 or points[-1][0] - points[0][0] < 600:
+        return "履歴不足で予測できません", None
+    if any(b[1] < a[1] for a, b in zip(points, points[1:])) or used < points[-1][1]:
+        return "履歴不足で予測できません", None
+    # Treat the current snapshot as the newest observation before deciding
+    # that usage is flat. This also recovers from historical bogus 0% samples.
+    if now > points[-1][0] and used > points[-1][1]:
+        points.append((now, used))
+    delta = points[-1][1] - points[0][1]
+    if delta == 0:
+        return "リセットまで持つ見込み", None
+    rate = delta / (points[-1][0] - points[0][0])
+    # The remaining quota belongs to the current snapshot, so forecast from now.
+    hit = now + (100 - used) / rate
+    if hit >= reset_epoch:
+        return "リセットまで持つ見込み", None
+    if hit <= now:
+        return "上限に達する見込み（予測時刻を経過）", None
+    minutes = max(1, math.ceil((hit - now) / 60))
+    days, rest = divmod(minutes, 1440)
+    hours, minutes = divmod(rest, 60)
+    duration = (f"{days}日" if days else "") + (f"{hours}時間" if hours else "") + (f"{minutes}分" if minutes else "")
+    return f"約{duration}後に上限へ達する見込み", int(hit)
 
 
-def pace_label(used: float | None, window_min: int, reset_epoch: int | None,
-               hist: list[tuple[int, float]] | tuple = (),
-               show_date: bool = True) -> str:
-    hit = project_hit(used, window_min, reset_epoch, hist)
-    if hit is None:
-        return "このペースならセーフ"
-    when = fmt_ts(hit) if show_date else datetime.fromtimestamp(hit).astimezone().strftime("%H:%M")
-    return f"このままだと{when}頃枯渇"
+def quota_forecast(used, window_min, reset_epoch, hist=(), show_date=True) -> str:
+    return _forecast_result(used, window_min, reset_epoch, hist, show_date)[0]
+
+
+def project_hit(used, window_min, reset_epoch, hist=()) -> int | None:
+    """Compatibility interface backed by the shared observed-sample forecast."""
+    return _forecast_result(used, window_min, reset_epoch, hist)[1]
+
+
+def pace_label(used, window_min, reset_epoch, hist=(), show_date=True) -> str:
+    return quota_forecast(used, window_min, reset_epoch, hist, show_date)
 
 
 def week_pace(used: float | None, window_min: int, reset_epoch: int | None) -> str:

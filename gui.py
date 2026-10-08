@@ -74,46 +74,7 @@ def remaining_text(text: str) -> tuple[str, str]:
 
 
 def quota_forecast(used, window_min, reset_epoch, hist=(), show_date=True) -> str:
-    """Explain a forecast only when comparable samples establish a recent rate."""
-    import math
-    import time
-
-    now = time.time()
-    try:
-        used, reset_epoch = float(used), float(reset_epoch)
-        if not math.isfinite(used) or not math.isfinite(reset_epoch) or window_min <= 0:
-            return "データ不足で予測できません"
-    except (TypeError, ValueError):
-        return "データ不足で予測できません"
-    if reset_epoch <= now:
-        return "リセット後のデータを待っています"
-    if used >= 100:
-        return "利用上限に達しています"
-    start = reset_epoch - window_min * 60
-    points = sorted((t, u) for t, u in hist if start <= t <= now)
-    if len(points) < 2 or points[-1][0] - points[0][0] < 600:
-        return "履歴不足で予測できません"
-    if any(b[1] < a[1] for a, b in zip(points, points[1:])) or used < points[-1][1]:
-        return "履歴不足で予測できません"
-    # Treat the current snapshot as the newest observation before deciding
-    # that usage is flat. This also recovers from historical bogus 0% samples.
-    if now > points[-1][0] and used > points[-1][1]:
-        points.append((now, used))
-    delta = points[-1][1] - points[0][1]
-    if delta == 0:
-        return "リセットまで持つ見込み"
-    rate = delta / (points[-1][0] - points[0][0])
-    # The remaining quota belongs to the current snapshot, so forecast from now.
-    hit = now + (100 - used) / rate
-    if hit >= reset_epoch:
-        return "リセットまで持つ見込み"
-    if hit <= now:
-        return "上限に達する見込み（予測時刻を経過）"
-    minutes = max(1, math.ceil((hit - now) / 60))
-    days, rest = divmod(minutes, 1440)
-    hours, minutes = divmod(rest, 60)
-    duration = (f"{days}日" if days else "") + (f"{hours}時間" if hours else "") + (f"{minutes}分" if minutes else "")
-    return f"約{duration}後に上限へ達する見込み"
+    return m.quota_forecast(used, window_min, reset_epoch, hist, show_date)
 
 
 

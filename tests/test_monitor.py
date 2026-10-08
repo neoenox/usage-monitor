@@ -36,9 +36,8 @@ def test_project_hit_window_linear():
     # 窓開始から50%使った → 100%は窓終了後=セーフ扱い(None)
     used = 50.0 * (now - start) / (300 * 60)
     assert m.project_hit(used, 300, reset) is None
-    # 激しく使って窓内に枯渇する pace
-    hit = m.project_hit(90.0, 300, reset)
-    assert hit is not None and hit < reset
+    # Without observations neither interface fabricates a linear forecast.
+    assert m.project_hit(90.0, 300, reset) is None
 
 
 def test_project_hit_history_slope():
@@ -54,11 +53,13 @@ def test_project_hit_history_slope():
 def test_pace_label():
     import re as _re
 
-    assert m.pace_label(0, 300, None) == "このペースならセーフ"
-    lbl = m.pace_label(90.0, 300, int(time.time()) + 3600)
-    assert "枯渇" in lbl
-    lbl_nodate = m.pace_label(90.0, 300, int(time.time()) + 3600, (), False)
-    assert _re.fullmatch(r"このままだと\d{2}:\d{2}頃枯渇", lbl_nodate), lbl_nodate
+    assert m.pace_label(0, 300, None) == "データ不足で予測できません"
+    now = int(time.time())
+    hist = [(now - 1200, 60.0), (now - 600, 75.0)]
+    lbl = m.pace_label(90.0, 300, now + 3600, hist)
+    assert "上限へ達する見込み" in lbl
+    assert m.pace_label(90.0, 300, now + 3600, hist, False) == lbl
+    assert m.pace_label(90.0, 300, now + 3600) == "履歴不足で予測できません"
 
 
 def test_week_pace():
