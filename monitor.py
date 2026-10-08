@@ -479,7 +479,7 @@ def scan_codex(home: Path) -> dict:
     return {
         "usage_status": usage_status,
         "usage_detail": usage_detail,
-        "rate_observed_at": latest_rl_ts if usage_status == "local_history" else "",
+        "rate_observed_at": latest_rl_epoch if usage_status == "local_history" else None,
         "files": len(files),
         "sessions_with_tokens": sessions_with_tokens,
         "input": total_in,
