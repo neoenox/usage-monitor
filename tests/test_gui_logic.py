@@ -15,18 +15,11 @@ def test_set_autostart_preserves_source_mode_tray_arg(tmp_path, monkeypatch):
         lambda: [r"C:\Python311\python.exe", r"C:\repo\gui.py", "--tray"],
     )
 
-    def fake_run(args, **kwargs):
-        captured["args"] = args
-        return None
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
+    import windows_shortcut
+    monkeypatch.setattr(windows_shortcut, 'create', lambda *args: captured.update(args=args))
     assert gui.set_autostart(True) is True
-    import base64
-    assert captured["args"][-2] == '-EncodedCommand'
-    ps = base64.b64decode(captured["args"][-1]).decode('utf-16le')
-    assert r"C:\repo\gui.py" in ps
-    assert "--tray" in ps
+    assert r"C:\repo\gui.py" in captured['args'][2]
+    assert '--tray' in captured['args'][2]
 
 
 def test_schedule_tick_cancels_previous_job():
@@ -135,7 +128,7 @@ def test_shortcut_path_quote_is_escaped(tmp_path, monkeypatch):
     captured = []
     monkeypatch.setattr(gui, "startup_dir", lambda: tmp_path / "don'tbreak")
     monkeypatch.setattr(gui, "autostart_target", lambda: ["C:/python.exe", "--tray"])
-    monkeypatch.setattr(subprocess, "run", lambda args, **kwargs: captured.append(args))
+    import windows_shortcut
+    monkeypatch.setattr(windows_shortcut, 'create', lambda *args: captured.append(args))
     assert gui.set_autostart(True)
-    import base64
-    assert "don''tbreak" in base64.b64decode(captured[0][-1]).decode('utf-16le')
+    assert "don'tbreak" in str(captured[0][0])

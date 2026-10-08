@@ -54,22 +54,12 @@ def set_autostart(on: bool) -> bool:
     try:
         if on:
             tgt = autostart_target()
-            shortcut = str(lnk).replace("'", "''")
-            target = str(tgt[0]).replace("'", "''")
-            arguments = subprocess.list2cmdline(tgt[1:]).replace("'", "''")
+            arguments = subprocess.list2cmdline(tgt[1:])
             working_dir = (
                 Path(tgt[1]).parent if len(tgt) > 2 else Path(tgt[0]).parent
             )
-            working = str(working_dir).replace("'", "''")
-            ps = (
-                f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{shortcut}');"
-                f"$s.TargetPath='{target}';$s.Arguments='{arguments}';"
-                f"$s.WorkingDirectory='{working}';$s.Save()"
-            )
-            import base64
-            encoded = base64.b64encode(ps.encode("utf-16le")).decode("ascii")
-            subprocess.run(["powershell", "-NoProfile", "-EncodedCommand", encoded], check=True,
-                           capture_output=True, timeout=30)
+            import windows_shortcut
+            windows_shortcut.create(lnk, tgt[0], arguments, working_dir)
         else:
             lnk.unlink(missing_ok=True)
         return True
