@@ -373,6 +373,10 @@ class App(tk.Tk):
             ent.insert(0, str(cfg[key]))
 
     def refresh(self) -> None:
+        if getattr(self, "_loading", False):
+            return
+        self._loading = True
+        self.btn_refresh.state(["disabled"])
         self.status.config(text="集計中...")
         th = threading.Thread(target=self._load, daemon=True)
         th.start()
@@ -384,6 +388,8 @@ class App(tk.Tk):
         self.after(0, lambda: self._render(codex, claude))
 
     def _render(self, codex: dict, claude: dict) -> None:
+        self._loading = False
+        self.btn_refresh.state(["!disabled"])
         codex, claude = m.normalize_snapshot(codex, claude)
         self._last = (codex, claude)
         rl = codex.get("rate_limits", {}) or {}
@@ -411,7 +417,7 @@ class App(tk.Tk):
         else:
             self.bar5["value"] = 0
             self.barW["value"] = 0
-            self.lbl5.config(text="未連携: codex login 後に「更新」")
+            self.lbl5.config(text=codex.get("usage_detail") or "未連携: 公式Codexでログイン後に「更新」")
             self.lblW.config(text="")
         ctx = codex.get("context", {}) or {}
         if ctx:
@@ -483,7 +489,9 @@ class App(tk.Tk):
 
         self._updated_at = time.monotonic()
         self.freshness.config(text=freshness_text(0))
-        self.status.config(text="更新しました")
+        self.status.config(text="更新しました（Codexは公式アカウントから取得）" if codex.get("usage_status") == "ok"
+                           else "更新しました（Codex使用量は未取得）" if not codex.get("has_rate")
+                           else "更新しました（Codexはローカル履歴）")
         if getattr(self, "tray", None):
             self.tray.update_from(codex, claude)
         self._schedule_tick()
@@ -525,12 +533,21 @@ class App(tk.Tk):
         self._tick_job = None
         if hasattr(self, "_updated_at"):
             import time
-            self.freshness.config(text=freshness_text(time.monotonic() - self._updated_at))
+            elapsed = time.monotonic() - self._updated_at
+            self.freshness.config(text=freshness_text(elapsed))
+            if elapsed >= 5 * 60:
+                self.refresh()
         if not hasattr(self, "_last"):
             self._schedule_tick()
             return
         codex, claude = self._last
+        codex, _ = m.normalize_snapshot(codex, {})
+        self._last = (codex, claude)
         if not codex.get("has_rate"):
+            if codex.get("usage_status") == "stale":
+                self.bar5["value"] = self.barW["value"] = 0
+                self.lbl5.config(text=codex["usage_detail"])
+                self.lblW.config(text="")
             self._schedule_tick()
             return
         rl = codex.get("rate_limits", {}) or {}
@@ -691,7 +708,7 @@ def tray_tooltip(codex: dict, claude: dict) -> str:
         cx = (f"Codex 5h残り{cx5:.0f}% / 週残り{cxw:.0f}%"
               if cx5 >= 0 else "Codex 未連携")
     else:
-        cx = "Codex 未連携"
+        cx = "Codex 使用量未取得"
     oauth = claude.get("oauth", {}) or {}
     if oauth.get("status") == "ok":
         def left(key: str) -> str:
@@ -730,14 +747,7 @@ class TrayController:
         import tray_win32
 
         tray_win32.run_threaded(self.tray)
-        self._schedule()
-
-    def _schedule(self) -> None:
-        self.app.after(5 * 60 * 1000, self._auto)
-
-    def _auto(self) -> None:
-        self.app.refresh()
-        self._schedule()
+        # App._tick owns the five-minute refresh in both window and tray modes.
 
     def update_from(self, codex: dict, claude: dict) -> None:
         self.tray.set_tooltip(tray_tooltip(codex, claude))
@@ -807,14 +817,14 @@ class TrayController:
         from datetime import datetime
 
         metrics: list[tuple[str, float, str]] = []
-        rl = codex.get("rate_limits", {}) or {}
+        rl = (codex.get("rate_limits", {}) or {}) if codex.get("has_rate") else {}
         for name, key, fmter in (
             ("Codex 5h", "primary", m.fmt_ts),
             ("Codex 週", "secondary", m.fmt_ts),
         ):
             w = rl.get(key, {}) or {}
             try:
-                left = 100 - float(w.get("used_percent") or 0)
+                left = 100 - float(w.get("used_percent"))
             except (TypeError, ValueError):
                 continue
             metrics.append((name, left, f"リセット{fmter(w.get('resets_at'))}"))

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """codex + claude usage snapshot monitor (stdlib only).
 
-Codex:  ~/.codex/sessions/**/*.jsonl の token_count イベントを集計
-  - トークン: ファイル毎の最終 total_token_usage を合算 (input/output/cached)
-  - レート制限: 最新タイムスタンプの rate_limits を採用 (primary 5h / secondary 週次)
+Codex:  公式Codex app-serverからアカウント全体の使用量を取得
+  - トークン: sessions/**/*.jsonl の最終 total_token_usage を合算 (input/output/cached)
+  - レート制限: account/rateLimits/read (primary 5h / secondary 週次)
+  - カスタムHOMEではネットワークに接続せずローカル履歴のみ
 Claude: ~/.claude/projects/**/*.jsonl の assistant message.usage を合算
   - 履歴が無ければ 0 + files=0 と明示 (現環境で確認済みの制約)
 """
@@ -16,7 +17,7 @@ import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CLAUDE_USAGE_BETA = "oauth-2025-04-20"
@@ -52,8 +53,8 @@ def is_stale(reset) -> bool:
 
 
 def normalize_snapshot(codex: dict, claude: dict) -> tuple[dict, dict]:
-    """窓終了後の古い値を新窓(使用0%)に正規化。起動直後や朝一番の表示崩れ防止。
-    元dictは変更しない。new_window_* フラグを付与。"""
+    """Codexの期限切れ値は不明扱い。Claudeの従来の新窓処理は維持。
+    元dictは変更しない。"""
     import copy
 
     codex, claude = copy.deepcopy(codex), copy.deepcopy(claude)
@@ -61,8 +62,10 @@ def normalize_snapshot(codex: dict, claude: dict) -> tuple[dict, dict]:
     for key, flag in (("primary", "new_window_5h"), ("secondary", "new_window_wk")):
         w = rl.get(key, {}) or {}
         if w.get("resets_at") and is_stale(w.get("resets_at")):
-            w["used_percent"] = 0.0
-            codex[flag] = True
+            codex["has_rate"] = False
+            if codex.get("usage_status") in (None, "ok", "local_history"):
+                codex["usage_status"] = "stale"
+                codex["usage_detail"] = "リセット後の最新データを取得できていません"
     oauth = claude.get("oauth", {}) or {}
     if oauth.get("status") == "ok":
         for key, flag in (("five_hour", "new_window_5h"), ("seven_day", "new_window_wk")):
@@ -250,8 +253,125 @@ def fmt_ts(epoch: int | float | None) -> str:
         return "-"
 
 
+def codex_executable(home: Path) -> Path | None:
+    """Find the official binary, including the desktop app's bundled CLI."""
+    import re
+    import shutil
+
+    root = Path(os.environ.get("CODEX_HOME") or home / ".codex")
+    candidates = list(root.glob("packages/*/releases/*/bin/codex.exe"))
+    def version(path):
+        match = re.search(r"(\d+)\.(\d+)\.(\d+)", str(path))
+        return tuple(map(int, match.groups())) if match else (0, 0, 0)
+    if candidates:
+        return max(candidates, key=version)
+    cli = shutil.which("codex.exe") or shutil.which("codex")
+    # Windows npm launchers require a shell. Locate their native binary instead.
+    if cli and Path(cli).suffix.lower() not in (".cmd", ".ps1", ".bat"):
+        return Path(cli)
+    npm = home / "AppData/Roaming/npm/node_modules/@openai"
+    candidates = list(npm.glob("codex*/**/codex.exe"))
+    return max(candidates, key=version) if candidates else None
+
+
+def codex_rate_limits(data: dict) -> dict:
+    """Validate and translate the official account/rateLimits/read response."""
+    import math
+
+    buckets = data.get("rateLimitsByLimitId") or {}
+    rl = buckets.get("codex") or data.get("rateLimits")
+    if not isinstance(rl, dict) or rl.get("limitId") not in (None, "codex"):
+        raise ValueError("Missing Codex quota")
+    result = {"plan_type": rl.get("planType", "-"), "limit_id": "codex"}
+    for key in ("primary", "secondary"):
+        w = rl.get(key)
+        if not isinstance(w, dict):
+            raise ValueError("Missing quota window")
+        used = w.get("usedPercent")
+        if isinstance(used, bool) or not isinstance(used, (float, int)):
+            raise ValueError("Invalid quota")
+        reset, duration = w.get("resetsAt"), w.get("windowDurationMins")
+        if (not math.isfinite(used) or not 0 <= used <= 100 or
+                isinstance(reset, bool) or not isinstance(reset, int) or reset <= 0 or
+                isinstance(duration, bool) or not isinstance(duration, int) or duration <= 0):
+            raise ValueError("Invalid quota window")
+        result[key] = {"used_percent": used, "resets_at": reset, "window_minutes": duration}
+    return result
+
+
+def _codex_rpc(executable: Path, home: Path, timeout: float = 20) -> dict:
+    """Short-lived stdio RPC; no prompts, model calls, or token handling."""
+    import queue
+    import subprocess
+    import threading
+    import time
+
+    env = os.environ.copy()
+    env["CODEX_HOME"] = str(Path(env.get("CODEX_HOME") or home / ".codex"))
+    proc = subprocess.Popen(
+        [str(executable), "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, text=True, encoding="utf-8", env=env, cwd=str(home),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    messages = queue.Queue()
+    def read_messages():
+        try:
+            for line in proc.stdout:
+                try:
+                    value = json.loads(line)
+                    if isinstance(value, dict):
+                        messages.put(value)
+                except ValueError:
+                    continue
+        finally:
+            messages.put(None)
+    reader = threading.Thread(target=read_messages, daemon=True)
+    reader.start()
+    deadline = time.monotonic() + timeout
+    def send(value):
+        proc.stdin.write(json.dumps(value) + "\n")
+        proc.stdin.flush()
+    def receive(request_id):
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError()
+            value = messages.get(timeout=remaining)
+            if value is None:
+                raise RuntimeError("Codex disconnected")
+            if value.get("id") == request_id:
+                if "error" in value or not isinstance(value.get("result"), dict):
+                    raise RuntimeError("Codex request failed")
+                return value["result"]
+    try:
+        send({"id": 1, "method": "initialize", "params": {
+            "clientInfo": {"name": "usage_monitor", "version": __version__}}})
+        receive(1)
+        send({"method": "initialized"})
+        send({"id": 2, "method": "account/rateLimits/read", "params": {}})
+        return receive(2)
+    finally:
+        proc.kill()
+        proc.wait(timeout=5)
+        reader.join(timeout=1)
+        for stream in (proc.stdin, proc.stdout):
+            if stream:
+                stream.close()
+
+
+def fetch_codex_usage(home: Path) -> dict:
+    executable = codex_executable(home)
+    if not executable:
+        return {"status": "missing_cli", "detail": "公式Codexをインストールしてログインしてください"}
+    try:
+        return {"status": "ok", "rate_limits": codex_rate_limits(_codex_rpc(executable, home))}
+    except Exception:
+        # Server errors may include private account details; never display them.
+        return {"status": "error", "detail": "Codex使用量を取得できません。公式Codexのログイン状態と接続を確認してください"}
+
+
 def scan_codex(home: Path) -> dict:
-    base = home / ".codex" / "sessions"
+    base = (Path(os.environ.get("CODEX_HOME") or home / ".codex") if _same_home(home)
+            else home / ".codex") / "sessions"
     files = sorted(base.rglob("*.jsonl")) if base.exists() else []
     total_in = total_out = total_cached = 0
     sessions_with_tokens = 0
@@ -340,7 +460,17 @@ def scan_codex(home: Path) -> dict:
                                    "pct": round(ctx_in / win * 100, 1)}
         except Exception:
             continue
+    usage_status, usage_detail = "local_history", ""
+    if _same_home(home):
+        live = fetch_codex_usage(home)
+        usage_status, usage_detail = live["status"], live.get("detail", "")
+        if usage_status == "ok":
+            latest_rl = live["rate_limits"]
+            latest_rl_file = "official_app_server"
     return {
+        "usage_status": usage_status,
+        "usage_detail": usage_detail,
+        "rate_observed_at": latest_rl_ts if usage_status == "local_history" else "",
         "files": len(files),
         "sessions_with_tokens": sessions_with_tokens,
         "input": total_in,
@@ -349,7 +479,7 @@ def scan_codex(home: Path) -> dict:
         "total": total_in + total_out,
         "rate_limits": latest_rl or {},
         "rate_source": latest_rl_file,
-        "has_rate": latest_rl is not None,
+        "has_rate": latest_rl is not None and usage_status in ("ok", "local_history"),
         "context": context,
     }
 
@@ -665,7 +795,7 @@ def main() -> int:
         if ctx:
             print(f"  context : {ctx['pct']}% ({fmt_num(ctx['input'])}/{fmt_num(ctx['window'])})")
     else:
-        print("  rate-limit: no history")
+        print(f"  rate-limit: unavailable ({codex.get('usage_detail') or 'no history'})")
     print(f"[Claude] transcripts: {claude['files']} messages: {claude['messages']} (src: ~/.claude/projects)")
     if claude["files"] <= 1:
         print("  NOTE: local history was auto-cleaned; real usage is NOT reflected")

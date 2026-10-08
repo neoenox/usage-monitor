@@ -168,7 +168,7 @@ def test_unlinked_home(tmp_path):
     codex = m.scan_codex(tmp_path)
     assert codex["files"] == 0 and codex["has_rate"] is False
     tip = gui.tray_tooltip(codex, {"oauth": {"status": "missing_token"}})
-    assert "Codex 未連携" in tip
+    assert "Codex 使用量未取得" in tip
 
 
 def test_newest_event_wins_over_mtime(tmp_path):
@@ -219,8 +219,9 @@ def test_normalize_snapshot():
                         "seven_day": {"utilization": 10.0,
                                       "resets_at": "2999-01-01T00:00:00+00:00"}}}
     cx, cl = m.normalize_snapshot(codex, claude)
-    assert cx["rate_limits"]["primary"]["used_percent"] == 0.0
-    assert cx["new_window_5h"] is True
+    assert cx["rate_limits"]["primary"]["used_percent"] == 99.0
+    assert cx["has_rate"] is False
+    assert cx["usage_status"] == "stale"
     assert cx["rate_limits"]["secondary"]["used_percent"] == 30.0
     assert "new_window_wk" not in cx
     assert cl["oauth"]["five_hour"]["utilization"] == 0.0

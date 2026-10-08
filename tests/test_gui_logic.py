@@ -53,6 +53,33 @@ def test_schedule_tick_cancels_previous_job():
     assert dummy._tick_job == "new"
 
 
+def test_refresh_ignores_overlapping_request(monkeypatch):
+    class Dummy:
+        _loading = True
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Overlapping refresh started")
+    monkeypatch.setattr(gui.threading, "Thread", unexpected)
+    gui.App.refresh(Dummy())
+
+
+def test_tick_auto_refreshes_even_without_codex_data(monkeypatch):
+    import time
+    class Label:
+        def config(self, **kwargs): pass
+    class Dummy:
+        _updated_at = 0
+        _last = ({"has_rate": False}, {})
+        freshness = Label()
+        refreshed = scheduled = 0
+        def refresh(self): self.refreshed += 1
+        def _schedule_tick(self): self.scheduled += 1
+    monkeypatch.setattr(time, "monotonic", lambda: 301)
+    obj = Dummy()
+    gui.App._tick(obj)
+    assert obj.refreshed == 1
+    assert obj.scheduled == 1
+
+
 def test_remaining_text_separates_value_and_reset():
     value, detail = gui.remaining_text("5h 残り80% (使用20%) reset=12:00 (1時間) [余裕あり]")
     assert value == "残り 80%"
