@@ -63,6 +63,7 @@ def test_cached_values_render_and_tick_without_new_history(app, fake_home, tmp_p
     live_c, live_cl = snapshots()
     c.update(live_c)
     cl.update(live_cl)
+    cl.pop('quota_source', None)  # Simulate the legacy direct-poll cache format.
     path = tmp_path/'last.json'
     cache.apply(c, cl, path)
     c['has_rate'] = False

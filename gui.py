@@ -320,6 +320,47 @@ class App(tk.Tk):
         self.btn_auto = ttk.Button(config, text="", command=self.toggle_autostart)
         self.btn_auto.pack(anchor="w")
         self._sync_autostart_btn()
+        ttk.Separator(config).pack(fill="x", pady=12)
+        ttk.Label(config, text="Claude使用率の連携", font=("Yu Gothic UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(config, text="認証情報は読み取りません。Claude Code利用時の使用率のみ保存します。\n独立したリアルタイム取得ではありません。", style="Hint.TLabel", justify="left").pack(anchor="w", pady=8)
+        ttk.Button(config, text="同意してstatusline連携を設定", command=self.setup_claude_export).pack(anchor="w")
+        ttk.Button(config, text="以前のstatuslineを復元", command=self.restore_claude_export).pack(anchor="w", pady=8)
+
+    def setup_claude_export(self):
+        from tkinter import messagebox
+        import claude_setup
+        import sys
+        from pathlib import Path
+        if not messagebox.askyesno("Claude連携への同意", "Claude Codeのstatuslineから使用率・リセット日時のみをローカル保存します。\n資格情報や会話は保存しません。設定しますか？", parent=self):
+            return
+        target = Path.home() / ".claude" / "settings.json"
+        try:
+            data = claude_setup._load(target)
+            replace = False
+            if "statusLine" in data:
+                replace = messagebox.askyesno("既存statuslineの置換", "既存statuslineはバックアップ後に置換され、その表示は一時停止します。\n後から復元できます。置換しますか？", parent=self)
+                if not replace:
+                    return
+            if getattr(sys, "frozen", False):
+                command = f'"{sys.executable}" --claude-export'
+            else:
+                command = f'"{sys.executable}" "{Path(__file__).resolve()}" --claude-export'
+            claude_setup.install(target, command, consent=True, replace_existing=replace)
+            self.status.config(text="Claude連携を設定しました。Claude Codeを再起動して利用してください")
+        except (OSError, ValueError) as exc:
+            self.status.config(text=f"設定失敗: {exc}")
+
+    def restore_claude_export(self):
+        from tkinter import messagebox
+        import claude_setup
+        from pathlib import Path
+        if not messagebox.askyesno("Claude連携の解除", "以前のstatusline設定を復元しますか？", parent=self):
+            return
+        try:
+            claude_setup.restore(Path.home() / ".claude" / "settings.json")
+            self.status.config(text="以前のstatuslineを復元しました")
+        except (OSError, ValueError) as exc:
+            self.status.config(text=f"復元失敗: {exc}")
 
     def save_thresholds(self) -> None:
         err = settings.save(self.ent_warn.get(), self.ent_crit.get())
@@ -876,6 +917,11 @@ class TrayController:
 
 if __name__ == "__main__":
     import sys
+
+    if "--claude-export" in sys.argv:
+        import claude_export
+        claude_export.main()
+        raise SystemExit(0)
 
     app = App()
     if "--tray" in sys.argv:
