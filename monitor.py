@@ -547,7 +547,7 @@ def claude_token(home: Path, *, isolated: bool = False) -> str:
     Order: env CLAUDE_CODE_OAUTH_TOKEN / ~/.claude_oauth_token file /
     ~/.claude/.credentials.json (written by `claude auth login`) /
     OS credential store entry (with refresh when expired).
-    期限切れ時は公式CLIに再取得させる (30分クールダウン)。
+    モデル呼び出しでの認証復旧は行わない。復旧できなければ公式ツールで再ログイン。
     """
     if not isolated:
         tok = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
@@ -639,41 +639,11 @@ def _refresh_oauth(refresh: str) -> str:
 
 
 def _cli_refresh_creds(home: Path) -> bool:
-    """公式CLIに極小APIコールを1発投げて資格情報ファイルを更新させる。
-    30分クールダウン。成功時True。
+    """Compatibility no-op: quota monitoring must never invoke a model.
+
+    Recover through official-tool re-login instead of consuming usage to refresh.
     """
-    import shutil
-    import subprocess
-    import time
-
-    if not shutil.which("claude"):
-        return False
-    try:
-        from pathlib import Path as _P
-
-        import os as _os
-
-        mark = _P(_os.environ.get("LOCALAPPDATA", str(home))) / "usage-monitor" / ".cli_refresh"
-        if mark.exists() and time.time() - mark.stat().st_mtime < 1800:
-            return False
-    except Exception:
-        pass
-    try:
-        proc = subprocess.run(
-            ["claude", "-p", "ping", "--output-format", "text"],
-            capture_output=True, timeout=120,
-            cwd=str(home),
-        )
-        if proc.returncode != 0:
-            return False
-        try:
-            mark.parent.mkdir(parents=True, exist_ok=True)
-            mark.write_text("1", encoding="utf-8")
-        except Exception:
-            pass
-        return True
-    except Exception:
-        return False
+    return False
 
 
 def claude_token_from_os_store() -> str:

@@ -474,7 +474,7 @@ class App(tk.Tk):
             self.cl_bar5["value"] = 0
             self.cl_barW["value"] = 0
             if oauth.get("status") == "expired":
-                self.cl_lbl5.config(text="トークン期限切れ: claudeを一度使うと自動復旧します")
+                self.cl_lbl5.config(text="認証期限切れ: claude auth login で再ログインしてください")
             else:
                 self.cl_lbl5.config(text="未設定: claude auth login を実行してください")
             self.cl_lblW.config(text="")
