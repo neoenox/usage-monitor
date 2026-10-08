@@ -35,6 +35,9 @@ def apply(codex: dict, claude: dict, path: Path, now=None):
         ('claude', claude, 'oauth', ('five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'), 'utilization', (claude.get('oauth') or {}).get('status') == 'ok'),
     ):
         windows = _windows(data.get(source) or {}, keys, field)
+        if data.get('quota_source') == 'statusline' and fresh:
+            # Export observations are not a newly polled sample. Keep their time.
+            continue
         if fresh and all(k in windows for k in keys[:2]):
             saved[name] = {'windows': windows, 'observed_at': now}
             data['observed_at'] = now
@@ -64,8 +67,9 @@ def apply(codex: dict, claude: dict, path: Path, now=None):
     return codex, claude
 
 
-def label(used, reset, observed):
+def label(used, reset, observed, source=None):
     import monitor as m
     epoch = m.iso_to_epoch(reset) if isinstance(reset, str) else reset
     expired = '・リセット前の参考値' if m.is_stale(epoch) else ''
-    return f'残り{100-used:.0f}%（前回取得値{expired}）\n取得日時: {m.fmt_ts(observed)}・更新失敗'
+    note = 'Claude Code利用時の観測値' if source == 'statusline' else '更新失敗'
+    return f'残り{100-used:.0f}%（前回取得値{expired}）\n取得日時: {m.fmt_ts(observed)}・{note}'

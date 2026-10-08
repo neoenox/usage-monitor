@@ -437,7 +437,7 @@ class App(tk.Tk):
             if oauth.get("status") == "expired":
                 self.cl_lbl5.config(text="認証期限切れ: claude auth login で再ログインしてください")
             else:
-                self.cl_lbl5.config(text="未設定: claude auth login を実行してください")
+                self.cl_lbl5.config(text="未取得: Claude statuslineエクスポートを設定し、Claude Codeを利用してください")
             self.cl_lblW.config(text="")
             self.cl_models.config(text="")
         else:
@@ -450,9 +450,10 @@ class App(tk.Tk):
         if claude.get("quota_cached"):
             import usage_cache
             for lbl, key in ((self.cl_lbl5, "five_hour"), (self.cl_lblW, "seven_day")):
-                w = oauth[key]
-                lbl.config(text=usage_cache.label(w["utilization"], w.get("resets_at"), claude["observed_at"]))
-            self.cl_models.config(text="前回取得値（オフライン参考値）")
+                w = oauth.get(key) or {}
+                if "utilization" in w:
+                    lbl.config(text=usage_cache.label(w["utilization"], w.get("resets_at"), claude["observed_at"], claude.get("quota_source")))
+            self.cl_models.config(text="Claude Code利用時の観測値（statusline）" if claude.get("quota_source") == "statusline" else "前回取得値（オフライン参考値）")
             cl5 = clw = None
 
         # 履歴記録＋グラフ
@@ -531,8 +532,9 @@ class App(tk.Tk):
             ):
                 if data.get("quota_cached"):
                     for lbl, key in rows:
-                        w = data[source][key]
-                        lbl.config(text=usage_cache.label(w[field], w.get("resets_at"), data["observed_at"]))
+                        w = data[source].get(key) or {}
+                        if field in w:
+                            lbl.config(text=usage_cache.label(w[field], w.get("resets_at"), data["observed_at"], data.get("quota_source")))
             self.freshness.config(text="表示は前回成功時の値です（各枠の取得日時を参照）")
             self._schedule_tick()
             return

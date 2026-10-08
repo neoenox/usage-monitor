@@ -498,9 +498,8 @@ def scan_claude(home: Path) -> dict:
                     cache_r += int(u.get("cache_read_input_tokens") or 0)
         except Exception:
             continue
-    # A caller that supplies another HOME is asking for an isolated scan.
-    # Do not fall through to this machine's env token or OS credential store.
-    oauth = fetch_claude_oauth(home, isolated=not _same_home(home))
+    import claude_export
+    oauth = claude_export.read(claude_export.path(None if _same_home(home) else home))
     return {
         "files": len(files),
         "messages": msgs,
@@ -510,6 +509,9 @@ def scan_claude(home: Path) -> dict:
         "cache_read": cache_r,
         "total": inp + out,
         "oauth": oauth,
+        "quota_source": "statusline",
+        "quota_cached": oauth.get("status") == "ok",
+        "observed_at": oauth.get("observed_at"),
     }
 
 

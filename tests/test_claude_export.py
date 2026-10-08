@@ -3,6 +3,20 @@ import pytest
 import claude_export as c
 
 
+def test_scan_uses_export_without_auth_access(tmp_path, monkeypatch):
+    import monitor as m
+    target = c.path(tmp_path)
+    c.export({'rate_limits': {'five_hour': {'used_percentage': 25, 'resets_at': 2000000000}}}, target, now=1900000000)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('credential or network access')
+    monkeypatch.setattr(m, 'fetch_claude_oauth', forbidden)
+    out = m.scan_claude(tmp_path)
+    assert out['oauth']['five_hour']['utilization'] == 25
+    assert out['observed_at'] == 1900000000
+    assert out['quota_cached'] is True
+    assert out['quota_source'] == 'statusline'
+
+
 def test_export_only_numeric_quota(tmp_path):
     target = tmp_path/'quota.json'
     c.export({'secret': 'NEVER', 'rate_limits': {'five_hour': {'used_percentage': 25, 'resets_at': 2000000000}}}, target, now=1900000000)
