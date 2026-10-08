@@ -47,6 +47,7 @@ def test_gui_render_e2e(app, fake_home):
     assert len(app.chart.find_all()) > 0
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Win32 tray APIs only")
 def test_tray_click_e2e():
     """実トレイアイコンに合成クリックを送り open 配送を検証 (バルーン1発表示)。"""
     sys.path.insert(0, str(ROOT))
@@ -76,6 +77,7 @@ def test_tray_click_e2e():
         assert not th.is_alive()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Win32 tray APIs only")
 def test_debug_log_rotation(tmp_path):
     """tray-debug.logは上限行で切り詰められる。"""
     import tray_win32
