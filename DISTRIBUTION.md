@@ -37,10 +37,10 @@ This documented interface is preferable to credential extraction, but it is not 
 
 ## Release gate
 
-- [ ] Replace direct Claude credential polling with approved numeric export, or obtain written permission.
-- [ ] Add first-run setup, consent, existing-statusline preservation and uninstall/restore instructions.
-- [ ] Test uninstalled, unauthenticated, expired/missing windows, offline, restart and recovery cases.
-- [ ] Verify no credentials in logs, quota cache, screenshots or packaged artifacts.
+- [x] Replace direct Claude credential polling with user-approved numeric export. This approval is the user's implementation choice, not provider distribution approval.
+- [x] Add provider setup guidance, consent, existing-statusline backup and uninstall/restore instructions.
+- [x] Test synthetic missing-tool/error states, expired/missing windows, offline, restart and recovery. No real account expiry is forced and Claude authentication is intentionally not inspected.
+- [x] Verify numeric whitelist and synthetic secret exclusion in quota cache and packaged export. No real credentials are used in these tests; this is not an exhaustive forensic scan of every local artifact.
 - [ ] Confirm Codex eligibility for the intended local/open-source/commercial/hosted distribution.
 
 Do not advertise the current build as ready for general commercial distribution.
