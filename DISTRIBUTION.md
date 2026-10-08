@@ -20,9 +20,9 @@ Before commercial/hosted distribution, confirm eligibility and the [Sign in with
 
 It also prohibits third-party developers offering Claude.ai login in their own apps or routing requests through users' Free/Pro/Max credentials. The exception for users signing into an unmodified official Claude Code binary is not permission to extract that binary's tokens into this monitor. No explicit read-only monitoring exception was found.
 
-**The current direct Claude OAuth adapter is not cleared for general distribution. User consent alone does not establish provider permission.** Obtain written provider approval before treating subscription-token polling as permitted. The model-call authentication fallback has been disabled independently, so monitoring cannot consume model usage to recover credentials.
+**Direct Claude OAuth polling is not cleared for general distribution. User consent alone does not establish provider permission.** The adapter has been retired: compatibility entry points are no-ops and neither credential reading nor network refresh is implemented. The monitor cannot consume model usage to recover credentials.
 
-## Proposed credential-free Claude integration (requires implementation approval)
+## Approved credential-free Claude integration
 
 The [documented statusline interface](https://code.claude.com/docs/en/statusline#rate-limit-usage) supplies JSON to a user-configured script, including:
 
