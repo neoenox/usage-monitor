@@ -253,3 +253,20 @@ def test_update_age_ticks_without_codex_data(app, monkeypatch):
     app._last = ({"has_rate": False}, {})
     app._tick()
     assert app.freshness.cget("text") == "最終更新：2分前"
+
+
+def test_alert_reads_thresholds_once_per_snapshot(monkeypatch):
+    """Codex 5h+weekly should use a consistent threshold snapshot."""
+    import gui
+    calls = []
+
+    def fake_settings():
+        calls.append(1)
+        return {"warn_at": 30, "crit_at": 15}
+
+    monkeypatch.setattr(gui.settings, "load", fake_settings)
+    ctl = gui.TrayController.__new__(gui.TrayController)
+    ctl.notified = {}
+    ctl.tray = _FakeTray()
+    ctl._check_alerts(_low_codex(), {"oauth": {"status": "missing_token"}})
+    assert len(calls) == 1
