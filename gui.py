@@ -831,9 +831,11 @@ class TrayController:
                 except (TypeError, ValueError):
                     continue
                 metrics.append((name, left, f"リセット{m.fmt_ts_iso(w.get('resets_at'))}"))
+        if not metrics:
+            return
+        cfg = settings.load()
+        warn_at, crit_at = cfg["warn_at"], cfg["crit_at"]
         for name, left, extra in metrics:
-            cfg = settings.load()
-            warn_at, crit_at = cfg["warn_at"], cfg["crit_at"]
             if left > warn_at + 5:
                 self.notified.pop(name, None)
                 continue
