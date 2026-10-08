@@ -95,3 +95,13 @@ def test_quota_forecast_distinguishes_safe_and_exhaustion(monkeypatch):
     assert gui.quota_forecast(100, 300, 25000) == "利用上限に達しています"
     assert gui.quota_forecast(20, 300, 19000) == "リセット後のデータを待っています"
     assert gui.quota_forecast(20, 300, 25000, [(18800, 30), (20000, 20)]) == "履歴不足で予測できません"
+
+
+def test_settings_save_normalizes_strings_and_rejects_nan(tmp_path, monkeypatch):
+    import settings
+    monkeypatch.setattr(settings, "path", lambda: tmp_path / "settings.json")
+    assert settings.save("32", "12") is None
+    assert settings.load() == {"warn_at": 32.0, "crit_at": 12.0}
+    assert settings.save(float("nan"), 10) is not None
+    assert settings.save(float("inf"), 10) is not None
+    assert settings.load() == {"warn_at": 32.0, "crit_at": 12.0}
