@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 
@@ -34,7 +35,7 @@ def save(warn_at: float, crit_at: float) -> str | None:
     if err:
         return err
     try:
-        path().write_text(json.dumps({"warn_at": warn_at, "crit_at": crit_at},
+        path().write_text(json.dumps({"warn_at": float(warn_at), "crit_at": float(crit_at)},
                                       ensure_ascii=False, indent=2),
                           encoding="utf-8")
     except Exception as e:
@@ -47,6 +48,6 @@ def validate(warn_at, crit_at) -> str | None:
         w, c = float(warn_at), float(crit_at)
     except (TypeError, ValueError):
         return "数値を入力してください"
-    if not (0 < c < w <= 100):
+    if not (math.isfinite(c) and math.isfinite(w) and 0 < c < w <= 100):
         return "0 < 緊急 < 警告 ≦ 100 にしてください"
     return None
