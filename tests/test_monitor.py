@@ -119,17 +119,19 @@ def test_scan_claude_local(claude_data):
     assert claude_data["oauth"]["status"] == "missing_token"
 
 
-def test_retired_oauth_does_not_use_environment_token(tmp_path, monkeypatch):
+def test_isolated_oauth_does_not_use_environment_token(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "dummy")
-    assert m.fetch_claude_oauth(tmp_path)["status"] == "unsupported"
+    assert m.fetch_claude_oauth(tmp_path, isolated=True)["status"] == "missing_token"
 
 
-def test_expired_credentials_not_read(tmp_path):
+def test_invalid_credentials_detected_without_token(tmp_path, monkeypatch):
+    monkeypatch.delenv('CLAUDE_CODE_OAUTH_TOKEN', raising=False)
+    monkeypatch.setattr(m, 'claude_token_from_os_store', lambda: '')
     creds = tmp_path / ".claude" / ".credentials.json"
     creds.parent.mkdir()
     creds.write_text("not even valid JSON", encoding="utf-8")
     assert m.claude_token(tmp_path) == ""
-    assert m.claude_has_creds(tmp_path) is False
+    assert m.claude_has_creds(tmp_path, isolated=True) is True
 
 
 def test_unlinked_home(tmp_path):
@@ -387,9 +389,11 @@ def test_expired_file_can_fall_back_to_os_store(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_refresh_oauth", lambda _: "")
     monkeypatch.setattr(m, "_cli_refresh_creds", lambda _: False)
     monkeypatch.setattr(m, "claude_token_from_os_store", lambda: "os-token")
-    assert m.claude_token(tmp_path) == ""
+    assert m.claude_token(tmp_path) == "os-token"
+    assert m.claude_token(tmp_path, isolated=True) == ""
 
 
-def test_non_windows_credential_lookup_is_safe():
+def test_non_windows_credential_lookup_is_safe(monkeypatch):
+    monkeypatch.setattr(m.os, 'name', 'posix')
     assert m.claude_token_from_os_store() == ""
     assert m._read_credential_store("nope") == ""

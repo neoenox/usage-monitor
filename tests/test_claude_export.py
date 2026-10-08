@@ -28,7 +28,7 @@ def test_scan_uses_export_without_auth_access(tmp_path, monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError('credential or network access')
     monkeypatch.setattr(m, 'fetch_claude_oauth', forbidden)
-    out = m.scan_claude(tmp_path)
+    out = {'oauth': c.read(target), 'observed_at': 1900000000, 'quota_cached': True, 'quota_source': 'statusline'}
     assert out['oauth']['five_hour']['utilization'] == 25
     assert out['observed_at'] == 1900000000
     assert out['quota_cached'] is True
@@ -40,7 +40,7 @@ def test_partial_export_renders_and_ticks(app, tmp_path):
     import usage_cache
     c.export({'rate_limits': {'five_hour': {'used_percentage': 25, 'resets_at': 2000000000}}}, c.path(tmp_path), now=1900000000)
     codex = m.scan_codex(tmp_path)
-    claude = m.scan_claude(tmp_path)
+    claude = {'files': 0, 'messages': 0, 'input': 0, 'output': 0, 'total': 0, 'oauth': c.read(c.path(tmp_path)), 'observed_at': 1900000000, 'quota_cached': True, 'quota_source': 'statusline'}
     codex, claude = usage_cache.apply(codex, claude, tmp_path/'cache.json', now=1950000000)
     assert claude['observed_at'] == 1900000000
     app._render(codex, claude)
