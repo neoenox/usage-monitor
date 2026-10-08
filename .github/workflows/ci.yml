@@ -23,3 +23,20 @@ jobs:
         # Tcl/Tk keeps native standard handles across interpreter lifetimes.
         # Preserve those handles while still capturing Python test output.
         run: python -m pytest tests -q --capture=sys
+
+  pytest-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install headless Tk and X11
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk xvfb xauth
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt pytest tzdata
+      - name: Run full test suite on Linux under virtual display
+        run: xvfb-run -a python -m pytest tests -q --capture=sys
