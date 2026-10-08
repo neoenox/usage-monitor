@@ -135,7 +135,9 @@ def test_fetch_oauth_ok(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: FakeRes())
     import pathlib
 
-    out = m.fetch_claude_oauth(pathlib.Path("/nonexistent"))
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setattr(m, "claude_token_from_os_store", lambda: "real-store-must-not-be-read")
+    out = m.fetch_claude_oauth(pathlib.Path("/nonexistent"), isolated=True)
     # token解決: envもfileも無いのでmissingのはず → envを仮設定して再試行
     assert out["status"] == "missing_token"
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "dummy")
