@@ -576,9 +576,7 @@ class App(tk.Tk):
                         w = data[source].get(key) or {}
                         if field in w:
                             lbl.config(text=usage_cache.label(w[field], w.get("resets_at"), data["observed_at"], data.get("quota_source")))
-            self.freshness.config(text="表示は前回成功時の値です（各枠の取得日時を参照）")
-            self._schedule_tick()
-            return
+            self.freshness.config(text="各枠の取得日時を参照（Claudeは利用時の観測値）" if claude.get("quota_source") == "statusline" and not codex.get("quota_cached") else "表示は前回成功時の値です（各枠の取得日時を参照）")
         codex, _ = m.normalize_snapshot(codex, {})
         self._last = (codex, claude)
         if not codex.get("has_rate"):
@@ -592,6 +590,8 @@ class App(tk.Tk):
         pri = rl.get("primary", {}) or {}
         sec = rl.get("secondary", {}) or {}
         try:
+            if codex.get("quota_cached"):
+                raise ValueError("Cached labels already updated")
             pu, su = float(pri.get("used_percent") or 0), float(sec.get("used_percent") or 0)
             self.lbl5.config(text=self._codex_label(
                 "5h", pu, pri.get("resets_at"), m.fmt_ts,
@@ -604,7 +604,7 @@ class App(tk.Tk):
         except (TypeError, ValueError):
             pass
         oauth = claude.get("oauth", {}) or {}
-        if oauth.get("status") == "ok":
+        if oauth.get("status") == "ok" and not claude.get("quota_cached"):
             for lbl, key, tag, flag in (
                     (self.cl_lbl5, "five_hour", "5h", "new_window_5h"),
                     (self.cl_lblW, "seven_day", "週", "new_window_wk")):

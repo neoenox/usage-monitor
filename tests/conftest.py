@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 import monitor as m  # noqa: E402
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def app(tmp_path_factory):
     """GUIテスト共有の単一Tkルート (複数ルートはWindowsで不安定なため)。
     Tkを作れない環境(CI等)ではスキップ。"""
@@ -30,12 +30,13 @@ def app(tmp_path_factory):
     gui.App.refresh = lambda self: None  # noqa: E731
     try:
         a = gui.App()
-    except Exception:
+    except Exception as exc:
+        import tkinter
         h.db_path = orig_db
         gui.App.refresh = orig_refresh
-        if os.environ.get("GITHUB_ACTIONS") == "true":
+        if os.environ.get("GITHUB_ACTIONS") == "true" or not isinstance(exc, tkinter.TclError):
             raise
-        pytest.skip("tk unavailable on this runner")
+        pytest.skip(f"tk unavailable on this runner: {exc}")
     a.withdraw()
     yield a
     try:
