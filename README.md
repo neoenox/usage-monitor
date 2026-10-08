@@ -21,7 +21,7 @@ claude auth status  # {"loggedIn": true} を確認
 python -m pip install -r requirements.txt
 
 # 4. モニターを起動
-python monitor.py   # Codex: ローカル履歴 / Claude: ログイン資格情報で使用量APIを自動取得
+python monitor.py   # Codex: 公式CLI経由で使用量取得 / Claude: ログイン資格情報で使用量APIを自動取得
 ```
 
 補足:
@@ -49,7 +49,10 @@ python -m pytest tests -q
 
 ## 機能
 
-- Codex: 5h/週次 残量バー＋リセット countdown＋枯渇予測、トークン累積、context使用率、推移グラフ
+- Codex: 公式Codexの `account/rateLimits/read` でアカウント全体の5h/週次使用量を取得。DSH・公式アプリ・VS Code拡張・CLIで同じアカウントを使った分を反映（別アカウント・APIキー課金は対象外）。トークン累積・context使用率はローカル履歴の参考値。
+  - 公式アプリ同梱CLI／インストール済みCLIを自動検出。認証・トークン更新は公式Codexに任せ、モニターはトークンを読み取らずモデル呼び出しもしない。
+  - 取得失敗・リセット後の未取得は残量不明として表示し、古い値を100%に置き換えたり履歴・アラートに記録しない。
+  - ウィンドウ／トレイの両モードで5分ごとに更新。`CODEX_HOME` にも対応。`--home` で別のHOMEを指定した場合はオフライン履歴のみ読み取る。
 - Claude: サブスク 5h/週次 (`claude auth login` の資格情報を自動読取)、モデル別週次、推移グラフ
 - トレイ常駐: ホバー表示、残量20%/10%でバルーン通知、5分毎に自動更新、自動起動ON/OFF
 
