@@ -27,6 +27,21 @@ def autostart_target() -> list[str]:
     return [sys.executable, str(Path(__file__).resolve()), "--tray"]
 
 
+def setup_guidance(codex, claude):
+    status = codex.get('usage_status')
+    if status == 'ok':
+        cx = 'Codex: 公式ツールから取得成功（認証は公式Codexが管理）'
+    elif status == 'missing_cli':
+        cx = 'Codex: 公式Codexをインストールし、codex loginでログインしてください。'
+    else:
+        cx = 'Codex: 最新取得は未確認。公式Codexを起動し、必要ならcodex loginで再ログイン。\n' + str(codex.get('usage_detail') or '「更新」で再確認してください。')
+    if claude.get('quota_source') == 'statusline' and (claude.get('oauth') or {}).get('status') == 'ok':
+        cl = 'Claude: statusline観測済み（認証状態の直接確認ではありません）。'
+    else:
+        cl = 'Claude: 観測は未取得。公式Claude Codeをインストールし、claude auth login。\n下のstatusline連携を設定してClaude Codeを利用してください。'
+    return cx, cl
+
+
 def autostart_enabled() -> bool:
     return (startup_dir() / STARTUP_LNK).exists()
 
@@ -323,7 +338,12 @@ class App(tk.Tk):
         self.btn_auto.pack(anchor="w")
         self._sync_autostart_btn()
         ttk.Separator(config).pack(fill="x", pady=12)
-        ttk.Label(config, text="Claude使用率の連携", font=("Yu Gothic UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(config, text="初回セットアップ / 連携状態", font=("Yu Gothic UI", 12, "bold")).pack(anchor="w")
+        self.setup_codex = ttk.Label(config, text="Codex: 確認中…", wraplength=470, justify="left")
+        self.setup_codex.pack(anchor="w", pady=6)
+        self.setup_claude = ttk.Label(config, text="Claude: 確認中…", wraplength=470, justify="left")
+        self.setup_claude.pack(anchor="w", pady=6)
+        ttk.Label(config, text="同一アカウントのサブスク利用枠が対象。API課金・他アカウント合算は対象外。", wraplength=470, style="Hint.TLabel").pack(anchor="w")
         ttk.Label(config, text="認証情報は読み取りません。Claude Code利用時の使用率のみ保存します。\n独立したリアルタイム取得ではありません。", style="Hint.TLabel", justify="left").pack(anchor="w", pady=8)
         ttk.Button(config, text="同意してstatusline連携を設定", command=self.setup_claude_export).pack(anchor="w")
         ttk.Button(config, text="以前のstatuslineを復元", command=self.restore_claude_export).pack(anchor="w", pady=8)
@@ -402,6 +422,9 @@ class App(tk.Tk):
         self.btn_refresh.state(["!disabled"])
         codex, claude = m.normalize_snapshot(codex, claude)
         self._last = (codex, claude)
+        cx_setup, cl_setup = setup_guidance(codex, claude)
+        self.setup_codex.config(text=cx_setup)
+        self.setup_claude.config(text=cl_setup)
         rl = codex.get("rate_limits", {}) or {}
         pri = rl.get("primary", {}) or {}
         sec = rl.get("secondary", {}) or {}
