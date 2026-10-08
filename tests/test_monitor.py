@@ -119,50 +119,18 @@ def test_scan_claude_local(claude_data):
     assert claude_data["oauth"]["status"] == "missing_token"
 
 
-def test_fetch_oauth_ok(monkeypatch):
-    payload = {"five_hour": {"utilization": 31.0, "resets_at": "2026-09-29T15:39:00+00:00"},
-               "seven_day": {"utilization": 5.0, "resets_at": "2026-10-06T06:00:00+00:00"}}
-
-    class FakeRes:
-        def read(self):
-            return json.dumps(payload).encode()
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: FakeRes())
-    import pathlib
-
-    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
-    monkeypatch.setattr(m, "claude_token_from_os_store", lambda: "real-store-must-not-be-read")
-    out = m.fetch_claude_oauth(pathlib.Path("/nonexistent"), isolated=True)
-    # token解決: envもfileも無いのでmissingのはず → envを仮設定して再試行
-    assert out["status"] == "missing_token"
+def test_retired_oauth_does_not_use_environment_token(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "dummy")
-    out = m.fetch_claude_oauth(pathlib.Path("/nonexistent"))
-    assert out["status"] == "ok"
-    assert out["five_hour"]["utilization"] == 31.0
+    assert m.fetch_claude_oauth(tmp_path)["status"] == "unsupported"
 
 
-def test_expired_status(tmp_path, monkeypatch):
-    """期限切れ資格情報 → CLI再取得が不発なら expired (未設定と区別)。"""
-    import json as _json
-    import time as _time
-
+def test_expired_credentials_not_read(tmp_path):
     creds = tmp_path / ".claude" / ".credentials.json"
-    creds.parent.mkdir(parents=True)
-    creds.write_text(_json.dumps({"claudeAiOauth": {
-        "accessToken": "old", "refreshToken": "r",
-        "expiresAt": int(_time.time() * 1000) - 3600_000}}), encoding="utf-8")
-    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
-    monkeypatch.setattr(m, "_cli_refresh_creds", lambda home: False)
-    monkeypatch.setattr(m, "_refresh_oauth", lambda refresh: "")
-    out = m.fetch_claude_oauth(tmp_path)
-    assert out["status"] == "expired"
-    assert m.claude_has_creds(tmp_path) is True
+    creds.parent.mkdir()
+    creds.write_text("not even valid JSON", encoding="utf-8")
+    assert m.claude_token(tmp_path) == ""
+    assert m.claude_has_creds(tmp_path) is False
+
 
 def test_unlinked_home(tmp_path):
     """空HOME: has_rate False・tooltipは未連携表示。"""
@@ -419,13 +387,9 @@ def test_expired_file_can_fall_back_to_os_store(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_refresh_oauth", lambda _: "")
     monkeypatch.setattr(m, "_cli_refresh_creds", lambda _: False)
     monkeypatch.setattr(m, "claude_token_from_os_store", lambda: "os-token")
-    assert m.claude_token(tmp_path) == "os-token"
+    assert m.claude_token(tmp_path) == ""
 
 
 def test_non_windows_credential_lookup_is_safe():
-    import os
-    import pytest
-    if os.name == "nt":
-        pytest.skip("Windows requires a Credential Manager integration test")
     assert m.claude_token_from_os_store() == ""
     assert m._read_credential_store("nope") == ""
