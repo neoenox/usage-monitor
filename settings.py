@@ -33,6 +33,7 @@ def save(warn_at: float, crit_at: float) -> str | None:
     err = validate(warn_at, crit_at)
     if err:
         return err
+    warn_at, crit_at = float(warn_at), float(crit_at)
     try:
         path().write_text(json.dumps({"warn_at": warn_at, "crit_at": crit_at},
                                       ensure_ascii=False, indent=2),
