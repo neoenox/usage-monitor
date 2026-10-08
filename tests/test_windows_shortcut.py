@@ -15,7 +15,10 @@ def test_real_shortcut_with_spaces_apostrophes_and_unicode(tmp_path, monkeypatch
     assert gui.set_autostart(True)
     shortcut = str(folder/gui.STARTUP_LNK).replace("'", "''")
     command = f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{shortcut}'); @{{target=$s.TargetPath;args=$s.Arguments;working=$s.WorkingDirectory}} | ConvertTo-Json -Compress"
-    result = subprocess.run(['powershell', '-NoProfile', '-Command', command], capture_output=True, check=True)
+    import base64
+    command = '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding; ' + command
+    encoded = base64.b64encode(command.encode('utf-16le')).decode('ascii')
+    result = subprocess.run(['powershell', '-NoProfile', '-EncodedCommand', encoded], capture_output=True, check=True)
     data = json.loads(result.stdout.decode('utf-8-sig'))
     assert data['target'].lower() == executable.lower()
     assert data['args'] == '--tray'

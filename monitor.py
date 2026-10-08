@@ -572,7 +572,7 @@ def main() -> int:
     codex, claude = normalize_snapshot(codex, claude)
 
     if args.json:
-        print(json.dumps({"codex": codex, "claude": claude}, ensure_ascii=False, indent=2))
+        print(json.dumps({"codex": codex, "claude": claude}, ensure_ascii=True, indent=2))
         return 0
 
     rl = codex.get("rate_limits", {}) or {}

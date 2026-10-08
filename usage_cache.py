@@ -17,7 +17,13 @@ def _windows(data, keys, field):
         value = window.get(field)
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 100:
             continue
-        result[key] = {field: value, 'resets_at': window.get('resets_at')}
+        reset = window.get('resets_at')
+        if reset is not None:
+            import monitor as m
+            epoch = m.iso_to_epoch(reset) if isinstance(reset, str) else reset
+            if isinstance(epoch, bool) or not isinstance(epoch, (int, float)) or not math.isfinite(epoch) or not 0 < epoch <= 253402300799:
+                continue
+        result[key] = {field: value, 'resets_at': reset}
     return result
 
 

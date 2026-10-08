@@ -100,6 +100,19 @@ def test_cached_values_do_not_send_alerts(tmp_path):
     assert controller.tray.balloons == []
 
 
+def test_nonfinite_reset_cache_is_rejected(tmp_path):
+    import json
+    path = tmp_path/'last.json'
+    c, cl = snapshots()
+    cache.apply(c, cl, path)
+    saved = json.loads(path.read_text())
+    saved['codex']['windows']['primary']['resets_at'] = float('inf')
+    path.write_text(json.dumps(saved))
+    c, _ = cache.apply({'has_rate': False, 'usage_status': 'error'}, {}, path)
+    assert not c.get('quota_cached')
+    assert not c['has_rate']
+
+
 def test_cache_contains_only_quota_fields(tmp_path):
     c, cl = snapshots()
     c['secret'] = cl['oauth']['token'] = 'do-not-store'

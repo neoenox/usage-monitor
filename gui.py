@@ -51,7 +51,9 @@ def set_autostart(on: bool) -> bool:
                 f"$s.TargetPath='{target}';$s.Arguments='{arguments}';"
                 f"$s.WorkingDirectory='{working}';$s.Save()"
             )
-            subprocess.run(["powershell", "-NoProfile", "-Command", ps], check=True,
+            import base64
+            encoded = base64.b64encode(ps.encode("utf-16le")).decode("ascii")
+            subprocess.run(["powershell", "-NoProfile", "-EncodedCommand", encoded], check=True,
                            capture_output=True, timeout=30)
         else:
             lnk.unlink(missing_ok=True)
