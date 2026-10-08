@@ -37,8 +37,10 @@ def setup_guidance(codex, claude):
         cx = 'Codex: 最新取得は未確認。公式Codexを起動し、必要ならcodex loginで再ログイン。\n' + str(codex.get('usage_detail') or '「更新」で再確認してください。')
     if claude.get('quota_source') == 'statusline' and (claude.get('oauth') or {}).get('status') == 'ok':
         cl = 'Claude: statusline観測済み（認証状態の直接確認ではありません）。'
+    elif (claude.get('oauth') or {}).get('status') == 'ok':
+        cl = 'Claude: 使用枠を直接取得成功。'
     else:
-        cl = 'Claude: 観測は未取得。公式Claude Codeをインストールし、claude auth login。\n下のstatusline連携を設定してClaude Codeを利用してください。'
+        cl = 'Claude: 未取得。公式Claude Codeでclaude auth login後、「更新」で再確認。'
     return cx, cl
 
 
@@ -334,9 +336,7 @@ class App(tk.Tk):
         self.setup_claude = ttk.Label(config, text="Claude: 確認中…", wraplength=470, justify="left")
         self.setup_claude.pack(anchor="w", pady=6)
         ttk.Label(config, text="同一アカウントのサブスク利用枠が対象。API課金・他アカウント合算は対象外。", wraplength=470, style="Hint.TLabel").pack(anchor="w")
-        ttk.Label(config, text="認証情報は読み取りません。Claude Code利用時の使用率のみ保存します。\n独立したリアルタイム取得ではありません。", style="Hint.TLabel", justify="left").pack(anchor="w", pady=8)
-        ttk.Button(config, text="同意してstatusline連携を設定", command=self.setup_claude_export).pack(anchor="w")
-        ttk.Button(config, text="以前のstatuslineを復元", command=self.restore_claude_export).pack(anchor="w", pady=8)
+        ttk.Label(config, text="Claudeは変更前の直接取得方式に復元しました。\n公式Claude Codeの保存済み認証を利用します。statusline設定は不要です。", style="Hint.TLabel", justify="left").pack(anchor="w", pady=8)
 
     def setup_claude_export(self):
         from tkinter import messagebox
@@ -493,7 +493,7 @@ class App(tk.Tk):
             if oauth.get("status") == "expired":
                 self.cl_lbl5.config(text="認証期限切れ: claude auth login で再ログインしてください")
             else:
-                self.cl_lbl5.config(text="未取得: Claude statuslineエクスポートを設定し、Claude Codeを利用してください")
+                self.cl_lbl5.config(text="未取得: 公式Claude Codeでclaude auth login後、更新してください")
             self.cl_lblW.config(text="")
             self.cl_models.config(text="")
         else:
