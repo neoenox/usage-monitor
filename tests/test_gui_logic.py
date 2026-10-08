@@ -22,7 +22,9 @@ def test_set_autostart_preserves_source_mode_tray_arg(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     assert gui.set_autostart(True) is True
-    ps = captured["args"][-1]
+    import base64
+    assert captured["args"][-2] == '-EncodedCommand'
+    ps = base64.b64decode(captured["args"][-1]).decode('utf-16le')
     assert r"C:\repo\gui.py" in ps
     assert "--tray" in ps
 
@@ -135,4 +137,5 @@ def test_shortcut_path_quote_is_escaped(tmp_path, monkeypatch):
     monkeypatch.setattr(gui, "autostart_target", lambda: ["C:/python.exe", "--tray"])
     monkeypatch.setattr(subprocess, "run", lambda args, **kwargs: captured.append(args))
     assert gui.set_autostart(True)
-    assert "don''tbreak" in captured[0][-1]
+    import base64
+    assert "don''tbreak" in base64.b64decode(captured[0][-1]).decode('utf-16le')
