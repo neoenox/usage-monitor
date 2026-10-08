@@ -39,6 +39,7 @@ def set_autostart(on: bool) -> bool:
     try:
         if on:
             tgt = autostart_target()
+            shortcut = str(lnk).replace("'", "''")
             target = str(tgt[0]).replace("'", "''")
             arguments = subprocess.list2cmdline(tgt[1:]).replace("'", "''")
             working_dir = (
@@ -46,7 +47,7 @@ def set_autostart(on: bool) -> bool:
             )
             working = str(working_dir).replace("'", "''")
             ps = (
-                f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}');"
+                f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{shortcut}');"
                 f"$s.TargetPath='{target}';$s.Arguments='{arguments}';"
                 f"$s.WorkingDirectory='{working}';$s.Save()"
             )
@@ -63,7 +64,7 @@ def remaining_text(text: str) -> tuple[str, str]:
     """Split quota summaries into a prominent remaining value and readable details."""
     import re
 
-    match = re.search(r"残り(-?[\d.]+)% \(使用[\d.]+%\)", text)
+    match = re.search(r"残り(-?\d+(?:\.\d+)?)% \(使用\d+(?:\.\d+)?%\)", text)
     if not match:
         return "", text
     headline = f"残り {match.group(1)}%"
@@ -175,7 +176,10 @@ class RemainingLabel(ttk.Frame):
         self.value.configure(text=headline)
         if headline:
             self.heading.pack(fill="x", before=self.detail)
-            state, color = quota_state(float(headline.split()[1][:-1]), settings.load())
+            try:
+                state, color = quota_state(float(headline.split()[1][:-1]), settings.load())
+            except (ValueError, IndexError, TypeError, OSError):
+                state, color = "Unavailable", "gray"
             self.badge.configure(text=state, foreground=color)
             if hasattr(self, "bar"):
                 self.bar.configure(style=f"{state}.Horizontal.TProgressbar")
@@ -871,9 +875,11 @@ class TrayController:
                 except (TypeError, ValueError):
                     continue
                 metrics.append((name, left, f"リセット{m.fmt_ts_iso(w.get('resets_at'))}"))
+        if not metrics:
+            return
+        cfg = settings.load()
+        warn_at, crit_at = cfg["warn_at"], cfg["crit_at"]
         for name, left, extra in metrics:
-            cfg = settings.load()
-            warn_at, crit_at = cfg["warn_at"], cfg["crit_at"]
             if left > warn_at + 5:
                 self.notified.pop(name, None)
                 continue

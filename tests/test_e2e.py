@@ -47,6 +47,7 @@ def test_gui_render_e2e(app, fake_home):
     assert len(app.chart.find_all()) > 0
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Win32 tray APIs only")
 def test_tray_click_e2e():
     """実トレイアイコンに合成クリックを送り open 配送を検証 (バルーン1発表示)。"""
     sys.path.insert(0, str(ROOT))
@@ -87,6 +88,7 @@ def test_codex_fetch_error_hides_stale_quota(app, fake_home):
     assert "Codex" in app.status.cget("text")
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Win32 tray APIs only")
 def test_debug_log_rotation(tmp_path):
     """tray-debug.logは上限行で切り詰められる。"""
     import tray_win32
@@ -274,3 +276,20 @@ def test_update_age_ticks_without_codex_data(app, monkeypatch):
     app._last = ({"has_rate": False}, {})
     app._tick()
     assert app.freshness.cget("text") == "最終更新：2分前"
+
+
+def test_alert_reads_thresholds_once_per_snapshot(monkeypatch):
+    """Codex 5h+weekly should use a consistent threshold snapshot."""
+    import gui
+    calls = []
+
+    def fake_settings():
+        calls.append(1)
+        return {"warn_at": 30, "crit_at": 15}
+
+    monkeypatch.setattr(gui.settings, "load", fake_settings)
+    ctl = gui.TrayController.__new__(gui.TrayController)
+    ctl.notified = {}
+    ctl.tray = _FakeTray()
+    ctl._check_alerts(_low_codex(), {"oauth": {"status": "missing_token"}})
+    assert len(calls) == 1

@@ -122,3 +122,17 @@ def test_quota_forecast_distinguishes_safe_and_exhaustion(monkeypatch):
     assert gui.quota_forecast(100, 300, 25000) == "利用上限に達しています"
     assert gui.quota_forecast(20, 300, 19000) == "リセット後のデータを待っています"
     assert gui.quota_forecast(20, 300, 25000, [(18800, 30), (20000, 20)]) == "履歴不足で予測できません"
+
+
+def test_bad_remaining_numeric_value_is_not_parsed():
+    assert gui.remaining_text("残り1..2% (使用20%)")[0] == ""
+
+
+def test_shortcut_path_quote_is_escaped(tmp_path, monkeypatch):
+    import subprocess
+    captured = []
+    monkeypatch.setattr(gui, "startup_dir", lambda: tmp_path / "don'tbreak")
+    monkeypatch.setattr(gui, "autostart_target", lambda: ["C:/python.exe", "--tray"])
+    monkeypatch.setattr(subprocess, "run", lambda args, **kwargs: captured.append(args))
+    assert gui.set_autostart(True)
+    assert "don''tbreak" in captured[0][-1]

@@ -571,7 +571,7 @@ def claude_token(home: Path, *, isolated: bool = False) -> str:
                     return tok
                 if _cli_refresh_creds(home):
                     continue
-                return ""
+                break  # try the OS store even when credentials.json is expired
         except Exception:
             pass
         break
@@ -584,10 +584,19 @@ def claude_has_creds(home: Path, *, isolated: bool = False) -> bool:
             return True
     except Exception:
         pass
-    return (
-        not isolated
-        and bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip())
-    )
+    try:
+        if (home / ".claude_oauth_token").read_text(encoding="utf-8").strip():
+            return True
+    except (OSError, UnicodeError):
+        pass
+    if isolated:
+        return False
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip():
+        return True
+    try:
+        return bool(_read_credential_store(CLAUDE_CRED_TARGET))
+    except (OSError, AttributeError):
+        return False
 
 
 def _resolve_oauth_access(oauth: dict) -> str:
@@ -673,8 +682,8 @@ def claude_token_from_os_store() -> str:
     Windows: Credential Manager target "Claude Code-credentials" (keytar).
     Returns a live accessToken, refreshing it when expired. "" when absent.
     """
-    import time
-
+    if os.name != "nt":
+        return ""
     raw = _read_credential_store(CLAUDE_CRED_TARGET)
     if not raw:
         return ""
@@ -687,6 +696,8 @@ def claude_token_from_os_store() -> str:
 
 def _read_credential_store(target: str) -> str:
     """Windows Credential Manager generic-credential password via ctypes."""
+    if os.name != "nt":
+        return ""
     import ctypes
     from ctypes import wintypes
 

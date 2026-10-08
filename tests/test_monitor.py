@@ -403,3 +403,26 @@ def test_daily_report_lines():
     assert "Codex 5h最大99%" in lines[0]
     assert "Claude 5h-" in lines[0]
     assert any("Codex週" in ln and "on pace" in ln for ln in lines)
+
+
+def test_expired_file_can_fall_back_to_os_store(tmp_path, monkeypatch):
+    creds = tmp_path / ".claude" / ".credentials.json"
+    creds.parent.mkdir()
+    creds.write_text(json.dumps({"claudeAiOauth": {
+        "accessToken": "old", "refreshToken": "r",
+        "expiresAt": int(time.time() * 1000) - 3600000,
+    }}), encoding="utf-8")
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setattr(m, "_refresh_oauth", lambda _: "")
+    monkeypatch.setattr(m, "_cli_refresh_creds", lambda _: False)
+    monkeypatch.setattr(m, "claude_token_from_os_store", lambda: "os-token")
+    assert m.claude_token(tmp_path) == "os-token"
+
+
+def test_non_windows_credential_lookup_is_safe():
+    import os
+    import pytest
+    if os.name == "nt":
+        pytest.skip("Windows requires a Credential Manager integration test")
+    assert m.claude_token_from_os_store() == ""
+    assert m._read_credential_store("nope") == ""
