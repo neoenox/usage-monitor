@@ -36,9 +36,8 @@ def test_project_hit_window_linear():
     # 窓開始から50%使った → 100%は窓終了後=セーフ扱い(None)
     used = 50.0 * (now - start) / (300 * 60)
     assert m.project_hit(used, 300, reset) is None
-    # 激しく使って窓内に枯渇する pace
-    hit = m.project_hit(90.0, 300, reset)
-    assert hit is not None and hit < reset
+    # Without observations neither interface fabricates a linear forecast.
+    assert m.project_hit(90.0, 300, reset) is None
 
 
 def test_project_hit_history_slope():
@@ -54,11 +53,13 @@ def test_project_hit_history_slope():
 def test_pace_label():
     import re as _re
 
-    assert m.pace_label(0, 300, None) == "このペースならセーフ"
-    lbl = m.pace_label(90.0, 300, int(time.time()) + 3600)
-    assert "枯渇" in lbl
-    lbl_nodate = m.pace_label(90.0, 300, int(time.time()) + 3600, (), False)
-    assert _re.fullmatch(r"このままだと\d{2}:\d{2}頃枯渇", lbl_nodate), lbl_nodate
+    assert m.pace_label(0, 300, None) == "データ不足で予測できません"
+    now = int(time.time())
+    hist = [(now - 1200, 60.0), (now - 600, 75.0)]
+    lbl = m.pace_label(90.0, 300, now + 3600, hist)
+    assert "上限へ達する見込み" in lbl
+    assert m.pace_label(90.0, 300, now + 3600, hist, False) == lbl
+    assert m.pace_label(90.0, 300, now + 3600) == "履歴不足で予測できません"
 
 
 def test_week_pace():
@@ -118,48 +119,18 @@ def test_scan_claude_local(claude_data):
     assert claude_data["oauth"]["status"] == "missing_token"
 
 
-def test_fetch_oauth_ok(monkeypatch):
-    payload = {"five_hour": {"utilization": 31.0, "resets_at": "2026-09-29T15:39:00+00:00"},
-               "seven_day": {"utilization": 5.0, "resets_at": "2026-10-06T06:00:00+00:00"}}
-
-    class FakeRes:
-        def read(self):
-            return json.dumps(payload).encode()
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: FakeRes())
-    import pathlib
-
-    out = m.fetch_claude_oauth(pathlib.Path("/nonexistent"))
-    # token解決: envもfileも無いのでmissingのはず → envを仮設定して再試行
-    assert out["status"] == "missing_token"
+def test_retired_oauth_does_not_use_environment_token(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "dummy")
-    out = m.fetch_claude_oauth(pathlib.Path("/nonexistent"))
-    assert out["status"] == "ok"
-    assert out["five_hour"]["utilization"] == 31.0
+    assert m.fetch_claude_oauth(tmp_path)["status"] == "unsupported"
 
 
-def test_expired_status(tmp_path, monkeypatch):
-    """期限切れ資格情報 → CLI再取得が不発なら expired (未設定と区別)。"""
-    import json as _json
-    import time as _time
-
+def test_expired_credentials_not_read(tmp_path):
     creds = tmp_path / ".claude" / ".credentials.json"
-    creds.parent.mkdir(parents=True)
-    creds.write_text(_json.dumps({"claudeAiOauth": {
-        "accessToken": "old", "refreshToken": "r",
-        "expiresAt": int(_time.time() * 1000) - 3600_000}}), encoding="utf-8")
-    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
-    monkeypatch.setattr(m, "_cli_refresh_creds", lambda home: False)
-    monkeypatch.setattr(m, "_refresh_oauth", lambda refresh: "")
-    out = m.fetch_claude_oauth(tmp_path)
-    assert out["status"] == "expired"
-    assert m.claude_has_creds(tmp_path) is True
+    creds.parent.mkdir()
+    creds.write_text("not even valid JSON", encoding="utf-8")
+    assert m.claude_token(tmp_path) == ""
+    assert m.claude_has_creds(tmp_path) is False
+
 
 def test_unlinked_home(tmp_path):
     """空HOME: has_rate False・tooltipは未連携表示。"""
@@ -168,7 +139,7 @@ def test_unlinked_home(tmp_path):
     codex = m.scan_codex(tmp_path)
     assert codex["files"] == 0 and codex["has_rate"] is False
     tip = gui.tray_tooltip(codex, {"oauth": {"status": "missing_token"}})
-    assert "Codex 未連携" in tip
+    assert "Codex 使用量未取得" in tip
 
 
 def test_newest_event_wins_over_mtime(tmp_path):
@@ -267,8 +238,9 @@ def test_normalize_snapshot():
                         "seven_day": {"utilization": 10.0,
                                       "resets_at": "2999-01-01T00:00:00+00:00"}}}
     cx, cl = m.normalize_snapshot(codex, claude)
-    assert cx["rate_limits"]["primary"]["used_percent"] == 0.0
-    assert cx["new_window_5h"] is True
+    assert cx["rate_limits"]["primary"]["used_percent"] == 99.0
+    assert cx["has_rate"] is False
+    assert cx["usage_status"] == "stale"
     assert cx["rate_limits"]["secondary"]["used_percent"] == 30.0
     assert "new_window_wk" not in cx
     assert cl["oauth"]["five_hour"]["utilization"] == 0.0
@@ -402,3 +374,22 @@ def test_daily_report_lines():
     assert "Codex 5h最大99%" in lines[0]
     assert "Claude 5h-" in lines[0]
     assert any("Codex週" in ln and "on pace" in ln for ln in lines)
+
+
+def test_expired_file_can_fall_back_to_os_store(tmp_path, monkeypatch):
+    creds = tmp_path / ".claude" / ".credentials.json"
+    creds.parent.mkdir()
+    creds.write_text(json.dumps({"claudeAiOauth": {
+        "accessToken": "old", "refreshToken": "r",
+        "expiresAt": int(time.time() * 1000) - 3600000,
+    }}), encoding="utf-8")
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setattr(m, "_refresh_oauth", lambda _: "")
+    monkeypatch.setattr(m, "_cli_refresh_creds", lambda _: False)
+    monkeypatch.setattr(m, "claude_token_from_os_store", lambda: "os-token")
+    assert m.claude_token(tmp_path) == ""
+
+
+def test_non_windows_credential_lookup_is_safe():
+    assert m.claude_token_from_os_store() == ""
+    assert m._read_credential_store("nope") == ""

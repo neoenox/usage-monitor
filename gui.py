@@ -27,6 +27,21 @@ def autostart_target() -> list[str]:
     return [sys.executable, str(Path(__file__).resolve()), "--tray"]
 
 
+def setup_guidance(codex, claude):
+    status = codex.get('usage_status')
+    if status == 'ok':
+        cx = 'Codex: 公式ツールから取得成功（認証は公式Codexが管理）'
+    elif status == 'missing_cli':
+        cx = 'Codex: 公式Codexをインストールし、codex loginでログインしてください。'
+    else:
+        cx = 'Codex: 最新取得は未確認。公式Codexを起動し、必要ならcodex loginで再ログイン。\n' + str(codex.get('usage_detail') or '「更新」で再確認してください。')
+    if claude.get('quota_source') == 'statusline' and (claude.get('oauth') or {}).get('status') == 'ok':
+        cl = 'Claude: statusline観測済み（認証状態の直接確認ではありません）。'
+    else:
+        cl = 'Claude: 観測は未取得。公式Claude Codeをインストールし、claude auth login。\n下のstatusline連携を設定してClaude Codeを利用してください。'
+    return cx, cl
+
+
 def autostart_enabled() -> bool:
     return (startup_dir() / STARTUP_LNK).exists()
 
@@ -39,19 +54,12 @@ def set_autostart(on: bool) -> bool:
     try:
         if on:
             tgt = autostart_target()
-            target = str(tgt[0]).replace("'", "''")
-            arguments = subprocess.list2cmdline(tgt[1:]).replace("'", "''")
+            arguments = subprocess.list2cmdline(tgt[1:])
             working_dir = (
                 Path(tgt[1]).parent if len(tgt) > 2 else Path(tgt[0]).parent
             )
-            working = str(working_dir).replace("'", "''")
-            ps = (
-                f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}');"
-                f"$s.TargetPath='{target}';$s.Arguments='{arguments}';"
-                f"$s.WorkingDirectory='{working}';$s.Save()"
-            )
-            subprocess.run(["powershell", "-NoProfile", "-Command", ps], check=True,
-                           capture_output=True, timeout=30)
+            import windows_shortcut
+            windows_shortcut.create(lnk, tgt[0], arguments, working_dir)
         else:
             lnk.unlink(missing_ok=True)
         return True
@@ -63,7 +71,7 @@ def remaining_text(text: str) -> tuple[str, str]:
     """Split quota summaries into a prominent remaining value and readable details."""
     import re
 
-    match = re.search(r"残り(-?[\d.]+)% \(使用[\d.]+%\)", text)
+    match = re.search(r"残り(-?\d+(?:\.\d+)?)% \(使用\d+(?:\.\d+)?%\)", text)
     if not match:
         return "", text
     headline = f"残り {match.group(1)}%"
@@ -73,46 +81,7 @@ def remaining_text(text: str) -> tuple[str, str]:
 
 
 def quota_forecast(used, window_min, reset_epoch, hist=(), show_date=True) -> str:
-    """Explain a forecast only when comparable samples establish a recent rate."""
-    import math
-    import time
-
-    now = time.time()
-    try:
-        used, reset_epoch = float(used), float(reset_epoch)
-        if not math.isfinite(used) or not math.isfinite(reset_epoch) or window_min <= 0:
-            return "データ不足で予測できません"
-    except (TypeError, ValueError):
-        return "データ不足で予測できません"
-    if reset_epoch <= now:
-        return "リセット後のデータを待っています"
-    if used >= 100:
-        return "利用上限に達しています"
-    start = reset_epoch - window_min * 60
-    points = sorted((t, u) for t, u in hist if start <= t <= now)
-    if len(points) < 2 or points[-1][0] - points[0][0] < 600:
-        return "履歴不足で予測できません"
-    if any(b[1] < a[1] for a, b in zip(points, points[1:])) or used < points[-1][1]:
-        return "履歴不足で予測できません"
-    # Treat the current snapshot as the newest observation before deciding
-    # that usage is flat. This also recovers from historical bogus 0% samples.
-    if now > points[-1][0] and used > points[-1][1]:
-        points.append((now, used))
-    delta = points[-1][1] - points[0][1]
-    if delta == 0:
-        return "リセットまで持つ見込み"
-    rate = delta / (points[-1][0] - points[0][0])
-    # The remaining quota belongs to the current snapshot, so forecast from now.
-    hit = now + (100 - used) / rate
-    if hit >= reset_epoch:
-        return "リセットまで持つ見込み"
-    if hit <= now:
-        return "上限に達する見込み（予測時刻を経過）"
-    minutes = max(1, math.ceil((hit - now) / 60))
-    days, rest = divmod(minutes, 1440)
-    hours, minutes = divmod(rest, 60)
-    duration = (f"{days}日" if days else "") + (f"{hours}時間" if hours else "") + (f"{minutes}分" if minutes else "")
-    return f"約{duration}後に上限へ達する見込み"
+    return m.quota_forecast(used, window_min, reset_epoch, hist, show_date)
 
 
 
@@ -123,7 +92,7 @@ def history_snapshot(codex: dict, p_used: float, s_used: float,
     """Build only history samples that were actually observed."""
     metrics: dict[str, float] = {}
     resets: dict[str, int | None] = {}
-    if codex.get("has_rate"):
+    if codex.get("has_rate") and not codex.get("quota_cached"):
         metrics.update({"codex_5h": p_used, "codex_wk": s_used})
         pri, sec = pri or {}, sec or {}
         resets.update({
@@ -175,7 +144,10 @@ class RemainingLabel(ttk.Frame):
         self.value.configure(text=headline)
         if headline:
             self.heading.pack(fill="x", before=self.detail)
-            state, color = quota_state(float(headline.split()[1][:-1]), settings.load())
+            try:
+                state, color = quota_state(float(headline.split()[1][:-1]), settings.load())
+            except (ValueError, IndexError, TypeError, OSError):
+                state, color = "Unavailable", "gray"
             self.badge.configure(text=state, foreground=color)
             if hasattr(self, "bar"):
                 self.bar.configure(style=f"{state}.Horizontal.TProgressbar")
@@ -355,6 +327,52 @@ class App(tk.Tk):
         self.btn_auto = ttk.Button(config, text="", command=self.toggle_autostart)
         self.btn_auto.pack(anchor="w")
         self._sync_autostart_btn()
+        ttk.Separator(config).pack(fill="x", pady=12)
+        ttk.Label(config, text="初回セットアップ / 連携状態", font=("Yu Gothic UI", 12, "bold")).pack(anchor="w")
+        self.setup_codex = ttk.Label(config, text="Codex: 確認中…", wraplength=470, justify="left")
+        self.setup_codex.pack(anchor="w", pady=6)
+        self.setup_claude = ttk.Label(config, text="Claude: 確認中…", wraplength=470, justify="left")
+        self.setup_claude.pack(anchor="w", pady=6)
+        ttk.Label(config, text="同一アカウントのサブスク利用枠が対象。API課金・他アカウント合算は対象外。", wraplength=470, style="Hint.TLabel").pack(anchor="w")
+        ttk.Label(config, text="認証情報は読み取りません。Claude Code利用時の使用率のみ保存します。\n独立したリアルタイム取得ではありません。", style="Hint.TLabel", justify="left").pack(anchor="w", pady=8)
+        ttk.Button(config, text="同意してstatusline連携を設定", command=self.setup_claude_export).pack(anchor="w")
+        ttk.Button(config, text="以前のstatuslineを復元", command=self.restore_claude_export).pack(anchor="w", pady=8)
+
+    def setup_claude_export(self):
+        from tkinter import messagebox
+        import claude_setup
+        import sys
+        from pathlib import Path
+        if not messagebox.askyesno("Claude連携への同意", "Claude Codeのstatuslineから使用率・リセット日時のみをローカル保存します。\n資格情報や会話は保存しません。設定しますか？", parent=self):
+            return
+        target = Path.home() / ".claude" / "settings.json"
+        try:
+            data = claude_setup._load(target)
+            replace = False
+            if "statusLine" in data:
+                replace = messagebox.askyesno("既存statuslineの置換", "既存statuslineはバックアップ後に置換され、その表示は一時停止します。\n後から復元できます。置換しますか？", parent=self)
+                if not replace:
+                    return
+            if getattr(sys, "frozen", False):
+                command = f'"{sys.executable}" --claude-export'
+            else:
+                command = f'"{sys.executable}" "{Path(__file__).resolve()}" --claude-export'
+            claude_setup.install(target, command, consent=True, replace_existing=replace)
+            self.status.config(text="Claude連携を設定しました。Claude Codeを再起動して利用してください")
+        except (OSError, ValueError) as exc:
+            self.status.config(text=f"設定失敗: {exc}")
+
+    def restore_claude_export(self):
+        from tkinter import messagebox
+        import claude_setup
+        from pathlib import Path
+        if not messagebox.askyesno("Claude連携の解除", "以前のstatusline設定を復元しますか？", parent=self):
+            return
+        try:
+            claude_setup.restore(Path.home() / ".claude" / "settings.json")
+            self.status.config(text="以前のstatuslineを復元しました")
+        except (OSError, ValueError) as exc:
+            self.status.config(text=f"復元失敗: {exc}")
 
     def save_thresholds(self) -> None:
         err = settings.save(self.ent_warn.get(), self.ent_crit.get())
@@ -373,6 +391,10 @@ class App(tk.Tk):
             ent.insert(0, str(cfg[key]))
 
     def refresh(self) -> None:
+        if getattr(self, "_loading", False):
+            return
+        self._loading = True
+        self.btn_refresh.state(["disabled"])
         self.status.config(text="集計中...")
         th = threading.Thread(target=self._load, daemon=True)
         th.start()
@@ -381,11 +403,18 @@ class App(tk.Tk):
         home = Path.home()
         codex = m.scan_codex(home)
         claude = m.scan_claude(home)
+        import usage_cache
+        codex, claude = usage_cache.apply(codex, claude, h.db_path().parent / "last-usage.json")
         self.after(0, lambda: self._render(codex, claude))
 
     def _render(self, codex: dict, claude: dict) -> None:
+        self._loading = False
+        self.btn_refresh.state(["!disabled"])
         codex, claude = m.normalize_snapshot(codex, claude)
         self._last = (codex, claude)
+        cx_setup, cl_setup = setup_guidance(codex, claude)
+        self.setup_codex.config(text=cx_setup)
+        self.setup_claude.config(text=cl_setup)
         rl = codex.get("rate_limits", {}) or {}
         pri = rl.get("primary", {}) or {}
         sec = rl.get("secondary", {}) or {}
@@ -411,8 +440,12 @@ class App(tk.Tk):
         else:
             self.bar5["value"] = 0
             self.barW["value"] = 0
-            self.lbl5.config(text="未連携: codex login 後に「更新」")
+            self.lbl5.config(text=codex.get("usage_detail") or "未連携: 公式Codexでログイン後に「更新」")
             self.lblW.config(text="")
+        if codex.get("quota_cached"):
+            import usage_cache
+            self.lbl5.config(text=usage_cache.label(p_used, pri.get("resets_at"), codex["observed_at"]))
+            self.lblW.config(text=usage_cache.label(s_used, sec.get("resets_at"), codex["observed_at"]))
         ctx = codex.get("context", {}) or {}
         if ctx:
             self.barCtx["value"] = ctx["pct"]
@@ -458,9 +491,9 @@ class App(tk.Tk):
             self.cl_bar5["value"] = 0
             self.cl_barW["value"] = 0
             if oauth.get("status") == "expired":
-                self.cl_lbl5.config(text="トークン期限切れ: claudeを一度使うと自動復旧します")
+                self.cl_lbl5.config(text="認証期限切れ: claude auth login で再ログインしてください")
             else:
-                self.cl_lbl5.config(text="未設定: claude auth login を実行してください")
+                self.cl_lbl5.config(text="未取得: Claude statuslineエクスポートを設定し、Claude Codeを利用してください")
             self.cl_lblW.config(text="")
             self.cl_models.config(text="")
         else:
@@ -469,6 +502,15 @@ class App(tk.Tk):
             self.cl_lbl5.config(text=f"取得エラー: {oauth.get('detail', '?')}")
             self.cl_lblW.config(text="")
             self.cl_models.config(text="")
+
+        if claude.get("quota_cached"):
+            import usage_cache
+            for lbl, key in ((self.cl_lbl5, "five_hour"), (self.cl_lblW, "seven_day")):
+                w = oauth.get(key) or {}
+                if "utilization" in w:
+                    lbl.config(text=usage_cache.label(w["utilization"], w.get("resets_at"), claude["observed_at"], claude.get("quota_source")))
+            self.cl_models.config(text="Claude Code利用時の観測値（statusline）" if claude.get("quota_source") == "statusline" else "前回取得値（オフライン参考値）")
+            cl5 = clw = None
 
         # 履歴記録＋グラフ
         try:
@@ -483,7 +525,12 @@ class App(tk.Tk):
 
         self._updated_at = time.monotonic()
         self.freshness.config(text=freshness_text(0))
-        self.status.config(text="更新しました")
+        self.status.config(text="更新しました（Codexは公式アカウントから取得）" if codex.get("usage_status") == "ok"
+                           else "更新しました（Codex使用量は未取得）" if not codex.get("has_rate")
+                           else "更新しました（Codexはローカル履歴）")
+        if codex.get("quota_cached") or (claude.get("quota_cached") and claude.get("quota_source") != "statusline"):
+            self.status.config(text="更新失敗：前回取得値を表示しています")
+            self.freshness.config(text="表示は前回成功時の値です（各枠の取得日時を参照）")
         if getattr(self, "tray", None):
             self.tray.update_from(codex, claude)
         self._schedule_tick()
@@ -525,18 +572,41 @@ class App(tk.Tk):
         self._tick_job = None
         if hasattr(self, "_updated_at"):
             import time
-            self.freshness.config(text=freshness_text(time.monotonic() - self._updated_at))
+            elapsed = time.monotonic() - self._updated_at
+            self.freshness.config(text=freshness_text(elapsed))
+            if elapsed >= 5 * 60:
+                self.refresh()
         if not hasattr(self, "_last"):
             self._schedule_tick()
             return
         codex, claude = self._last
+        if codex.get("quota_cached") or claude.get("quota_cached"):
+            import usage_cache
+            for data, source, field, rows in (
+                (codex, "rate_limits", "used_percent", ((self.lbl5, "primary"), (self.lblW, "secondary"))),
+                (claude, "oauth", "utilization", ((self.cl_lbl5, "five_hour"), (self.cl_lblW, "seven_day"))),
+            ):
+                if data.get("quota_cached"):
+                    for lbl, key in rows:
+                        w = data[source].get(key) or {}
+                        if field in w:
+                            lbl.config(text=usage_cache.label(w[field], w.get("resets_at"), data["observed_at"], data.get("quota_source")))
+            self.freshness.config(text="各枠の取得日時を参照（Claudeは利用時の観測値）" if claude.get("quota_source") == "statusline" and not codex.get("quota_cached") else "表示は前回成功時の値です（各枠の取得日時を参照）")
+        codex, _ = m.normalize_snapshot(codex, {})
+        self._last = (codex, claude)
         if not codex.get("has_rate"):
+            if codex.get("usage_status") == "stale":
+                self.bar5["value"] = self.barW["value"] = 0
+                self.lbl5.config(text=codex["usage_detail"])
+                self.lblW.config(text="")
             self._schedule_tick()
             return
         rl = codex.get("rate_limits", {}) or {}
         pri = rl.get("primary", {}) or {}
         sec = rl.get("secondary", {}) or {}
         try:
+            if codex.get("quota_cached"):
+                raise ValueError("Cached labels already updated")
             pu, su = float(pri.get("used_percent") or 0), float(sec.get("used_percent") or 0)
             self.lbl5.config(text=self._codex_label(
                 "5h", pu, pri.get("resets_at"), m.fmt_ts,
@@ -549,7 +619,7 @@ class App(tk.Tk):
         except (TypeError, ValueError):
             pass
         oauth = claude.get("oauth", {}) or {}
-        if oauth.get("status") == "ok":
+        if oauth.get("status") == "ok" and not claude.get("quota_cached"):
             for lbl, key, tag, flag in (
                     (self.cl_lbl5, "five_hour", "5h", "new_window_5h"),
                     (self.cl_lblW, "seven_day", "週", "new_window_wk")):
@@ -691,7 +761,7 @@ def tray_tooltip(codex: dict, claude: dict) -> str:
         cx = (f"Codex 5h残り{cx5:.0f}% / 週残り{cxw:.0f}%"
               if cx5 >= 0 else "Codex 未連携")
     else:
-        cx = "Codex 未連携"
+        cx = "Codex 使用量未取得"
     oauth = claude.get("oauth", {}) or {}
     if oauth.get("status") == "ok":
         def left(key: str) -> str:
@@ -703,6 +773,10 @@ def tray_tooltip(codex: dict, claude: dict) -> str:
         cl = f"Claude 5h残り{left('five_hour')} / 週残り{left('seven_day')}"
     else:
         cl = "Claude サブスク未取得"
+    if codex.get("quota_cached"):
+        cx += "（前回取得値）"
+    if claude.get("quota_cached"):
+        cl += "（前回取得値）"
     return f"{cx}\n{cl}"
 
 
@@ -730,14 +804,7 @@ class TrayController:
         import tray_win32
 
         tray_win32.run_threaded(self.tray)
-        self._schedule()
-
-    def _schedule(self) -> None:
-        self.app.after(5 * 60 * 1000, self._auto)
-
-    def _auto(self) -> None:
-        self.app.refresh()
-        self._schedule()
+        # App._tick owns the five-minute refresh in both window and tray modes.
 
     def update_from(self, codex: dict, claude: dict) -> None:
         self.tray.set_tooltip(tray_tooltip(codex, claude))
@@ -771,14 +838,14 @@ class TrayController:
         if all(v is None for v in yesterday.values()):
             return
         verdicts = {}
-        sec = (codex.get("rate_limits", {}) or {}).get("secondary", {}) or {}
+        sec = ((codex.get("rate_limits", {}) or {}).get("secondary", {}) or {}) if not codex.get("quota_cached") else {}
         try:
             verdicts["codex_wk"] = m.week_pace(float(sec.get("used_percent")), 10080,
                                                sec.get("resets_at"))
         except (TypeError, ValueError):
             pass
         oauth = claude.get("oauth", {}) or {}
-        if oauth.get("status") == "ok":
+        if oauth.get("status") == "ok" and not claude.get("quota_cached"):
             w = oauth.get("seven_day", {}) or {}
             try:
                 verdicts["claude_wk"] = m.week_pace(
@@ -807,19 +874,19 @@ class TrayController:
         from datetime import datetime
 
         metrics: list[tuple[str, float, str]] = []
-        rl = codex.get("rate_limits", {}) or {}
+        rl = (codex.get("rate_limits", {}) or {}) if codex.get("has_rate") and not codex.get("quota_cached") else {}
         for name, key, fmter in (
             ("Codex 5h", "primary", m.fmt_ts),
             ("Codex 週", "secondary", m.fmt_ts),
         ):
             w = rl.get(key, {}) or {}
             try:
-                left = 100 - float(w.get("used_percent") or 0)
+                left = 100 - float(w.get("used_percent"))
             except (TypeError, ValueError):
                 continue
             metrics.append((name, left, f"リセット{fmter(w.get('resets_at'))}"))
         oauth = claude.get("oauth", {}) or {}
-        if oauth.get("status") == "ok":
+        if oauth.get("status") == "ok" and not claude.get("quota_cached"):
             for name, key in (("Claude 5h", "five_hour"), ("Claude 週", "seven_day")):
                 w = oauth.get(key, {}) or {}
                 try:
@@ -827,9 +894,11 @@ class TrayController:
                 except (TypeError, ValueError):
                     continue
                 metrics.append((name, left, f"リセット{m.fmt_ts_iso(w.get('resets_at'))}"))
+        if not metrics:
+            return
+        cfg = settings.load()
+        warn_at, crit_at = cfg["warn_at"], cfg["crit_at"]
         for name, left, extra in metrics:
-            cfg = settings.load()
-            warn_at, crit_at = cfg["warn_at"], cfg["crit_at"]
             if left > warn_at + 5:
                 self.notified.pop(name, None)
                 continue
@@ -863,6 +932,11 @@ class TrayController:
 
 if __name__ == "__main__":
     import sys
+
+    if "--claude-export" in sys.argv:
+        import claude_export
+        claude_export.main()
+        raise SystemExit(0)
 
     app = App()
     if "--tray" in sys.argv:

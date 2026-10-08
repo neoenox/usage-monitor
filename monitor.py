@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """codex + claude usage snapshot monitor (stdlib only).
 
-Codex:  ~/.codex/sessions/**/*.jsonl の token_count イベントを集計
-  - トークン: ファイル毎の最終 total_token_usage を合算 (input/output/cached)
-  - レート制限: 最新タイムスタンプの rate_limits を採用 (primary 5h / secondary 週次)
+Codex:  公式Codex app-serverからアカウント全体の使用量を取得
+  - トークン: sessions/**/*.jsonl の最終 total_token_usage を合算 (input/output/cached)
+  - レート制限: account/rateLimits/read (primary 5h / secondary 週次)
+  - カスタムHOMEではネットワークに接続せずローカル履歴のみ
 Claude: ~/.claude/projects/**/*.jsonl の assistant message.usage を合算
   - 履歴が無ければ 0 + files=0 と明示 (現環境で確認済みの制約)
 """
@@ -16,7 +17,7 @@ import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-__version__ = "0.5.0"
+__version__ = "0.5.2"
 
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CLAUDE_USAGE_BETA = "oauth-2025-04-20"
@@ -52,19 +53,21 @@ def is_stale(reset) -> bool:
 
 
 def normalize_snapshot(codex: dict, claude: dict) -> tuple[dict, dict]:
-    """窓終了後の古い値を新窓(使用0%)に正規化。起動直後や朝一番の表示崩れ防止。
-    元dictは変更しない。new_window_* フラグを付与。"""
+    """Codexの期限切れ値は不明扱い。Claudeの従来の新窓処理は維持。
+    元dictは変更しない。"""
     import copy
 
     codex, claude = copy.deepcopy(codex), copy.deepcopy(claude)
     rl = codex.get("rate_limits", {}) or {}
     for key, flag in (("primary", "new_window_5h"), ("secondary", "new_window_wk")):
         w = rl.get(key, {}) or {}
-        if w.get("resets_at") and is_stale(w.get("resets_at")):
-            w["used_percent"] = 0.0
-            codex[flag] = True
+        if not codex.get("quota_cached") and w.get("resets_at") and is_stale(w.get("resets_at")):
+            codex["has_rate"] = False
+            if codex.get("usage_status") in (None, "ok", "local_history"):
+                codex["usage_status"] = "stale"
+                codex["usage_detail"] = "リセット後の最新データを取得できていません"
     oauth = claude.get("oauth", {}) or {}
-    if oauth.get("status") == "ok":
+    if oauth.get("status") == "ok" and not claude.get("quota_cached"):
         for key, flag in (("five_hour", "new_window_5h"), ("seven_day", "new_window_wk")):
             w = oauth.get(key, {}) or {}
             if w.get("resets_at") and is_stale(w.get("resets_at")):
@@ -93,50 +96,71 @@ def fmt_countdown(target) -> str:
     return f"あと{h}時間{m}分" if h else f"あと{m}分"
 
 
-def project_hit(used: float | None, window_min: int, reset_epoch: int | None,
-                 hist: list[tuple[int, float]] | tuple = ()) -> int | None:
-    """このペースで100%に達するepochを予測。窓内に収まる場合のみ返す。
-
-    履歴(同一窓内の2点以上・10分以上の幅)があれば傾きを使用、
-    なければ窓開始→現在の線形で推定。buryな利用のため目安。
-    """
+def _forecast_result(used, window_min, reset_epoch, hist=(), show_date=True) -> tuple[str, int | None]:
+    """Explain a forecast only when comparable samples establish a recent rate."""
+    import math
     import time
 
-    now = int(time.time())
-    if not reset_epoch or window_min <= 0:
-        return None
+    now = time.time()
     try:
-        reset_epoch = int(float(reset_epoch))
+        if any(isinstance(v, bool) for v in (used, reset_epoch, window_min)):
+            return "データ不足で予測できません", None
+        used, reset_epoch, window_min = float(used), float(reset_epoch), float(window_min)
+        if not all(math.isfinite(v) for v in (used, reset_epoch, window_min)) or not 0 <= used <= 100 or window_min <= 0:
+            return "データ不足で予測できません", None
     except (TypeError, ValueError):
-        return None
+        return "データ不足で予測できません", None
+    if reset_epoch <= now:
+        return "リセット後のデータを待っています", None
+    if used >= 100:
+        return "利用上限に達しています", None
     start = reset_epoch - window_min * 60
-    pts = sorted((int(t), float(u)) for t, u in hist if int(t) >= start)
-    if len(pts) >= 2 and pts[-1][0] - pts[0][0] >= 600 and pts[-1][1] > pts[0][1]:
-        dt = pts[-1][0] - pts[0][0]
-        du = pts[-1][1] - pts[0][1]
-        t_hit = pts[-1][0] + (100 - pts[-1][1]) / du * dt
-    else:
-        if used is None:
-            return None
-        try:
-            used = float(used)
-        except (TypeError, ValueError):
-            return None
-        el = now - start
-        if el <= 60 or used <= 0:
-            return None
-        t_hit = start + 100 / used * el
-    return int(t_hit) if t_hit < reset_epoch else None
+    points = []
+    try:
+        for t, u in hist:
+            if any(not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) for v in (t, u)) or not 0 <= u <= 100:
+                return "履歴不足で予測できません", None
+            if start <= t <= now:
+                points.append((t, u))
+        points.sort()
+    except (TypeError, ValueError, OverflowError):
+        return "履歴不足で予測できません", None
+    if len(points) < 2 or points[-1][0] - points[0][0] < 600:
+        return "履歴不足で予測できません", None
+    if any(b[1] < a[1] for a, b in zip(points, points[1:])) or used < points[-1][1]:
+        return "履歴不足で予測できません", None
+    # Treat the current snapshot as the newest observation before deciding
+    # that usage is flat. This also recovers from historical bogus 0% samples.
+    if now > points[-1][0] and used > points[-1][1]:
+        points.append((now, used))
+    delta = points[-1][1] - points[0][1]
+    if delta == 0:
+        return "リセットまで持つ見込み", None
+    rate = delta / (points[-1][0] - points[0][0])
+    # The remaining quota belongs to the current snapshot, so forecast from now.
+    hit = now + (100 - used) / rate
+    if hit >= reset_epoch:
+        return "リセットまで持つ見込み", None
+    if hit <= now:
+        return "上限に達する見込み（予測時刻を経過）", None
+    minutes = max(1, math.ceil((hit - now) / 60))
+    days, rest = divmod(minutes, 1440)
+    hours, minutes = divmod(rest, 60)
+    duration = (f"{days}日" if days else "") + (f"{hours}時間" if hours else "") + (f"{minutes}分" if minutes else "")
+    return f"約{duration}後に上限へ達する見込み", int(hit)
 
 
-def pace_label(used: float | None, window_min: int, reset_epoch: int | None,
-               hist: list[tuple[int, float]] | tuple = (),
-               show_date: bool = True) -> str:
-    hit = project_hit(used, window_min, reset_epoch, hist)
-    if hit is None:
-        return "このペースならセーフ"
-    when = fmt_ts(hit) if show_date else datetime.fromtimestamp(hit).astimezone().strftime("%H:%M")
-    return f"このままだと{when}頃枯渇"
+def quota_forecast(used, window_min, reset_epoch, hist=(), show_date=True) -> str:
+    return _forecast_result(used, window_min, reset_epoch, hist, show_date)[0]
+
+
+def project_hit(used, window_min, reset_epoch, hist=()) -> int | None:
+    """Compatibility interface backed by the shared observed-sample forecast."""
+    return _forecast_result(used, window_min, reset_epoch, hist)[1]
+
+
+def pace_label(used, window_min, reset_epoch, hist=(), show_date=True) -> str:
+    return quota_forecast(used, window_min, reset_epoch, hist, show_date)
 
 
 def week_pace(used: float | None, window_min: int, reset_epoch: int | None) -> str:
@@ -250,14 +274,133 @@ def fmt_ts(epoch: int | float | None) -> str:
         return "-"
 
 
+def codex_executable(home: Path) -> Path | None:
+    """Find the official binary, including the desktop app's bundled CLI."""
+    import re
+    import shutil
+
+    root = Path(os.environ.get("CODEX_HOME") or home / ".codex")
+    candidates = list(root.glob("packages/*/releases/*/bin/codex.exe"))
+    def version(path):
+        match = re.search(r"(\d+)\.(\d+)\.(\d+)", str(path))
+        return tuple(map(int, match.groups())) if match else (0, 0, 0)
+    if candidates:
+        return max(candidates, key=version)
+    cli = shutil.which("codex.exe") or shutil.which("codex")
+    # Windows npm launchers require a shell. Locate their native binary instead.
+    if cli and Path(cli).suffix.lower() not in (".cmd", ".ps1", ".bat"):
+        return Path(cli)
+    npm = home / "AppData/Roaming/npm/node_modules/@openai"
+    candidates = list(npm.glob("codex*/**/codex.exe"))
+    return max(candidates, key=version) if candidates else None
+
+
+def codex_rate_limits(data: dict) -> dict:
+    """Validate and translate the official account/rateLimits/read response."""
+    import math
+
+    buckets = data.get("rateLimitsByLimitId") or {}
+    rl = buckets.get("codex") or data.get("rateLimits")
+    if not isinstance(rl, dict) or rl.get("limitId") not in (None, "codex"):
+        raise ValueError("Missing Codex quota")
+    result = {"plan_type": rl.get("planType", "-"), "limit_id": "codex"}
+    for key in ("primary", "secondary"):
+        w = rl.get(key)
+        if not isinstance(w, dict):
+            raise ValueError("Missing quota window")
+        used = w.get("usedPercent")
+        if isinstance(used, bool) or not isinstance(used, (float, int)):
+            raise ValueError("Invalid quota")
+        reset, duration = w.get("resetsAt"), w.get("windowDurationMins")
+        if (not math.isfinite(used) or not 0 <= used <= 100 or
+                isinstance(reset, bool) or not isinstance(reset, int) or reset <= 0 or
+                isinstance(duration, bool) or not isinstance(duration, int) or duration <= 0):
+            raise ValueError("Invalid quota window")
+        result[key] = {"used_percent": used, "resets_at": reset, "window_minutes": duration}
+    return result
+
+
+def _codex_rpc(executable: Path, home: Path, timeout: float = 20) -> dict:
+    """Short-lived stdio RPC; no prompts, model calls, or token handling."""
+    import queue
+    import subprocess
+    import threading
+    import time
+
+    env = os.environ.copy()
+    env["CODEX_HOME"] = str(Path(env.get("CODEX_HOME") or home / ".codex"))
+    proc = subprocess.Popen(
+        [str(executable), "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, text=True, encoding="utf-8", env=env, cwd=str(home),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    messages = queue.Queue()
+    def read_messages():
+        try:
+            for line in proc.stdout:
+                try:
+                    value = json.loads(line)
+                    if isinstance(value, dict):
+                        messages.put(value)
+                except ValueError:
+                    continue
+        finally:
+            messages.put(None)
+    reader = threading.Thread(target=read_messages, daemon=True)
+    reader.start()
+    deadline = time.monotonic() + timeout
+    def send(value):
+        proc.stdin.write(json.dumps(value) + "\n")
+        proc.stdin.flush()
+    def receive(request_id):
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError()
+            value = messages.get(timeout=remaining)
+            if value is None:
+                raise RuntimeError("Codex disconnected")
+            if value.get("id") == request_id:
+                if "error" in value or not isinstance(value.get("result"), dict):
+                    raise RuntimeError("Codex request failed")
+                return value["result"]
+    try:
+        send({"id": 1, "method": "initialize", "params": {
+            "clientInfo": {"name": "usage_monitor", "version": __version__}}})
+        receive(1)
+        send({"method": "initialized"})
+        send({"id": 2, "method": "account/rateLimits/read", "params": {}})
+        return receive(2)
+    finally:
+        proc.kill()
+        proc.wait(timeout=5)
+        reader.join(timeout=1)
+        for stream in (proc.stdin, proc.stdout):
+            if stream:
+                stream.close()
+
+
+def fetch_codex_usage(home: Path) -> dict:
+    executable = codex_executable(home)
+    if not executable:
+        return {"status": "missing_cli", "detail": "公式Codexをインストールしてログインしてください"}
+    try:
+        return {"status": "ok", "rate_limits": codex_rate_limits(_codex_rpc(executable, home))}
+    except Exception:
+        # Server errors may include private account details; never display them.
+        return {"status": "error", "detail": "Codex使用量を取得できません。公式Codexのログイン状態と接続を確認してください"}
+
+
 def scan_codex(home: Path) -> dict:
-    base = home / ".codex" / "sessions"
+    base = (Path(os.environ.get("CODEX_HOME") or home / ".codex") if _same_home(home)
+            else home / ".codex") / "sessions"
     files = sorted(base.rglob("*.jsonl")) if base.exists() else []
     total_in = total_out = total_cached = 0
     sessions_with_tokens = 0
-    # レート制限は「mtime最新ファイルの最終token_countイベント」を採用
-    # (コミュニティツールと同方式。timestamp文字列のmax比較は未来日付混入に弱い)
-    newest_with_tokens = None
+    latest_rl = None
+    latest_rl_epoch = None
+    latest_rl_file = ""
+    context: dict = {}
+    latest_ctx_ts = ""
     for f in files:
         last_usage = None
         try:
@@ -267,89 +410,59 @@ def scan_codex(home: Path) -> dict:
                         continue
                     try:
                         d = json.loads(line)
-                    except Exception:
+                    except (ValueError, TypeError):
                         continue
-                    payload = d.get("payload", {}) if isinstance(d, dict) else {}
-                    info = payload.get("info", {}) if isinstance(payload, dict) else {}
+                    if not isinstance(d, dict):
+                        continue
+                    payload = d.get("payload") or {}
+                    if not isinstance(payload, dict):
+                        continue
+                    info = payload.get("info") or {}
+                    if not isinstance(info, dict):
+                        info = {}
                     tu = info.get("total_token_usage") or payload.get("total_token_usage")
                     if isinstance(tu, dict) and "input_tokens" in tu:
                         last_usage = tu
-                        newest_with_tokens = (f, tu)
-        except Exception:
+                    rl = payload.get("rate_limits")
+                    if isinstance(rl, dict) and isinstance(rl.get("primary"), dict):
+                        ts = d.get("timestamp")
+                        epoch = iso_to_epoch(str(ts)) if ts else None
+                        if (not ts and latest_rl_epoch is None) or (epoch is not None and
+                                (latest_rl_epoch is None or epoch >= latest_rl_epoch)):
+                            latest_rl, latest_rl_file = rl, f.name
+                            if epoch is not None:
+                                latest_rl_epoch = epoch
+                    if "token_count" in line:
+                        ts = str(d.get("timestamp", ""))
+                        if ts >= latest_ctx_ts:
+                            last = info.get("last_token_usage") or {}
+                            try:
+                                ctx_in = int(last.get("input_tokens") or 0)
+                                win = int(info.get("model_context_window") or 0)
+                            except (TypeError, ValueError, AttributeError):
+                                continue
+                            if win > 0:
+                                latest_ctx_ts = ts
+                                context = {"input": ctx_in, "window": win,
+                                           "pct": round(ctx_in / win * 100, 1)}
+        except OSError:
             continue
         if last_usage:
             sessions_with_tokens += 1
             total_in += int(last_usage.get("input_tokens") or 0)
             total_out += int(last_usage.get("output_tokens") or 0)
             total_cached += int(last_usage.get("cached_input_tokens") or 0)
-    # レート制限は「全ファイル中の最新token_countイベント」を採用。
-    # mtime順では複数セッションが交互追記されると古い値を掴むため、
-    # イベントtimestampをepochへ正規化して選ぶ。primaryがdictでない行は除外。
-    latest_rl = None
-    latest_rl_epoch = None
-    latest_rl_file = ""
-    for f in files:
-        try:
-            with open(f, encoding="utf-8", errors="ignore") as fh:
-                for line in fh:
-                    if "rate_limits" not in line:
-                        continue
-                    try:
-                        d = json.loads(line)
-                    except Exception:
-                        continue
-                    payload = d.get("payload", {}) if isinstance(d, dict) else {}
-                    rl = payload.get("rate_limits") if isinstance(payload, dict) else None
-                    if not isinstance(rl, dict) or not isinstance(rl.get("primary"), dict):
-                        continue
-                    ts = d.get("timestamp")
-                    if not ts:
-                        # Keep the legacy fallback if no dated event is available.
-                        if latest_rl_epoch is None:
-                            latest_rl = rl
-                            latest_rl_file = f.name
-                        continue
-                    ts_epoch = iso_to_epoch(str(ts))
-                    if ts_epoch is None:
-                        continue
-                    if latest_rl_epoch is None or ts_epoch >= latest_rl_epoch:
-                        latest_rl_epoch = ts_epoch
-                        latest_rl = rl
-                        latest_rl_file = f.name
-        except Exception:
-            continue
-    # contextも全ファイル中の最新token_countイベントから取得
-    context: dict = {}
-    latest_ctx_ts = ""
-    for f in files:
-        try:
-            with open(f, encoding="utf-8", errors="ignore") as fh:
-                for line in fh:
-                    if "token_count" not in line:
-                        continue
-                    try:
-                        d = json.loads(line)
-                    except Exception:
-                        continue
-                    ts = str(d.get("timestamp", ""))
-                    if ts < latest_ctx_ts:
-                        continue
-                    payload = d.get("payload", {}) if isinstance(d, dict) else {}
-                    info = payload.get("info", {}) if isinstance(payload, dict) else {}
-                    last = info.get("last_token_usage") or {}
-                    win = info.get("model_context_window") or 0
-                    try:
-                        ctx_in = int(last.get("input_tokens") or 0)
-                        win = int(win)
-                    except (TypeError, ValueError, AttributeError):
-                        continue
-                    if win > 0:
-                        latest_ctx_ts = ts
-                        context = {"input": ctx_in, "window": win,
-                                   "pct": round(ctx_in / win * 100, 1)}
-        except Exception:
-            continue
+    usage_status, usage_detail = "local_history", ""
+    if _same_home(home):
+        live = fetch_codex_usage(home)
+        usage_status, usage_detail = live["status"], live.get("detail", "")
+        if usage_status == "ok":
+            latest_rl = live["rate_limits"]
+            latest_rl_file = "official_app_server"
     return {
+        "usage_status": usage_status,
+        "usage_detail": usage_detail,
+        "rate_observed_at": latest_rl_epoch if usage_status == "local_history" else None,
         "files": len(files),
         "sessions_with_tokens": sessions_with_tokens,
         "input": total_in,
@@ -358,7 +471,7 @@ def scan_codex(home: Path) -> dict:
         "total": total_in + total_out,
         "rate_limits": latest_rl or {},
         "rate_source": latest_rl_file,
-        "has_rate": latest_rl is not None,
+        "has_rate": latest_rl is not None and usage_status in ("ok", "local_history"),
         "context": context,
     }
 
@@ -396,9 +509,8 @@ def scan_claude(home: Path) -> dict:
                     cache_r += int(u.get("cache_read_input_tokens") or 0)
         except Exception:
             continue
-    # A caller that supplies another HOME is asking for an isolated scan.
-    # Do not fall through to this machine's env token or OS credential store.
-    oauth = fetch_claude_oauth(home, isolated=not _same_home(home))
+    import claude_export
+    oauth = claude_export.read(claude_export.path(None if _same_home(home) else home))
     return {
         "files": len(files),
         "messages": msgs,
@@ -408,223 +520,43 @@ def scan_claude(home: Path) -> dict:
         "cache_read": cache_r,
         "total": inp + out,
         "oauth": oauth,
+        "quota_source": "statusline",
+        "quota_cached": oauth.get("status") == "ok",
+        "observed_at": oauth.get("observed_at"),
     }
 
 
+# Retired compatibility interfaces: never read subscription credentials or poll OAuth.
 def claude_token(home: Path, *, isolated: bool = False) -> str:
-    """Resolve Claude OAuth access token (memory only, never persisted).
-
-    Order: env CLAUDE_CODE_OAUTH_TOKEN / ~/.claude_oauth_token file /
-    ~/.claude/.credentials.json (written by `claude auth login`) /
-    OS credential store entry (with refresh when expired).
-    期限切れ時は公式CLIに再取得させる (30分クールダウン)。
-    """
-    if not isolated:
-        tok = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
-        if tok:
-            return tok
-    try:
-        p = home / ".claude_oauth_token"
-        if p.exists():
-            tok = p.read_text(encoding="utf-8", errors="ignore").strip()
-            if tok:
-                return tok
-    except Exception:
-        pass
-    for _ in range(2):  # 初回 + CLI再取得後の再読込
-        try:
-            p = home / ".claude" / ".credentials.json"
-            if p.exists():
-                creds = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
-                tok = _resolve_oauth_access(creds.get("claudeAiOauth") or {})
-                if tok:
-                    return tok
-                if _cli_refresh_creds(home):
-                    continue
-                return ""
-        except Exception:
-            pass
-        break
-    return "" if isolated else claude_token_from_os_store()
+    return ""
 
 
 def claude_has_creds(home: Path, *, isolated: bool = False) -> bool:
-    try:
-        if (home / ".claude" / ".credentials.json").exists():
-            return True
-    except Exception:
-        pass
-    return (
-        not isolated
-        and bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip())
-    )
+    return False
 
 
 def _resolve_oauth_access(oauth: dict) -> str:
-    """Return a live accessToken from a claudeAiOauth dict, refreshing if expired."""
-    import time
-
-    access = str(oauth.get("accessToken") or "")
-    try:
-        expired = float(oauth.get("expiresAt") or 0) / 1000 < time.time() + 60
-    except (TypeError, ValueError):
-        expired = True
-    if access and not expired:
-        return access
-    refresh = str(oauth.get("refreshToken") or "")
-    if not refresh:
-        return access  # try anyway; API will tell
-    return _refresh_oauth(refresh)
+    return ""
 
 
 def _refresh_oauth(refresh: str) -> str:
-    """リフレッシュ1回のみ (リトライループ禁止: エンドポイントが厳格)。"""
-    try:
-        body = json.dumps(
-            {
-                "grant_type": "refresh_token",
-                "refresh_token": refresh,
-                "client_id": CLAUDE_CLIENT_ID,
-            }
-        ).encode()
-        req = urllib.request.Request(
-            CLAUDE_TOKEN_URL, data=body,
-            headers={"Content-Type": "application/json", "User-Agent": BROWSER_UA,
-                     "Accept": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=10) as res:
-            data = json.loads(res.read().decode("utf-8", "ignore"))
-        return str(data.get("access_token") or "")
-    except Exception:
-        return ""
+    return ""
 
 
 def _cli_refresh_creds(home: Path) -> bool:
-    """公式CLIに極小APIコールを1発投げて資格情報ファイルを更新させる。
-    30分クールダウン。成功時True。
-    """
-    import shutil
-    import subprocess
-    import time
-
-    if not shutil.which("claude"):
-        return False
-    try:
-        from pathlib import Path as _P
-
-        import os as _os
-
-        mark = _P(_os.environ.get("LOCALAPPDATA", str(home))) / "usage-monitor" / ".cli_refresh"
-        if mark.exists() and time.time() - mark.stat().st_mtime < 1800:
-            return False
-    except Exception:
-        pass
-    try:
-        proc = subprocess.run(
-            ["claude", "-p", "ping", "--output-format", "text"],
-            capture_output=True, timeout=120,
-            cwd=str(home),
-        )
-        if proc.returncode != 0:
-            return False
-        try:
-            mark.parent.mkdir(parents=True, exist_ok=True)
-            mark.write_text("1", encoding="utf-8")
-        except Exception:
-            pass
-        return True
-    except Exception:
-        return False
+    return False
 
 
 def claude_token_from_os_store() -> str:
-    """Read OAuth creds Claude Code stored in the OS credential store.
-
-    Windows: Credential Manager target "Claude Code-credentials" (keytar).
-    Returns a live accessToken, refreshing it when expired. "" when absent.
-    """
-    import time
-
-    raw = _read_credential_store(CLAUDE_CRED_TARGET)
-    if not raw:
-        return ""
-    try:
-        oauth = json.loads(raw).get("claudeAiOauth") or {}
-    except Exception:
-        return ""
-    return _resolve_oauth_access(oauth)
+    return ""
 
 
 def _read_credential_store(target: str) -> str:
-    """Windows Credential Manager generic-credential password via ctypes."""
-    import ctypes
-    from ctypes import wintypes
-
-    class CREDENTIAL(ctypes.Structure):
-        _fields_ = [
-            ("Flags", wintypes.DWORD),
-            ("Type", wintypes.DWORD),
-            ("TargetName", wintypes.LPWSTR),
-            ("Comment", wintypes.LPWSTR),
-            ("LastWritten", wintypes.FILETIME),
-            ("CredentialBlobSize", wintypes.DWORD),
-            ("CredentialBlob", wintypes.LPBYTE),
-            ("Persist", wintypes.DWORD),
-            ("AttributeCount", wintypes.DWORD),
-            ("Attributes", wintypes.LPVOID),
-            ("TargetAlias", wintypes.LPWSTR),
-            ("UserName", wintypes.LPWSTR),
-        ]
-
-    advapi32 = ctypes.windll.advapi32
-    pcred = ctypes.POINTER(CREDENTIAL)()
-    if not advapi32.CredReadW(target, 1, 0, ctypes.byref(pcred)):
-        return ""
-    try:
-        size = int(pcred.contents.CredentialBlobSize)
-        buf = ctypes.string_at(pcred.contents.CredentialBlob, size)
-        return buf.decode("utf-16-le", errors="ignore").rstrip("\x00")
-    except Exception:
-        return ""
-    finally:
-        advapi32.CredFree(pcred)
+    return ""
 
 
 def fetch_claude_oauth(home: Path, *, isolated: bool = False) -> dict:
-    """GET /api/oauth/usage (same endpoint Claude Code /usage uses).
-
-    Returns {"status": "ok", "five_hour": {...}, "seven_day": {...}}
-    or {"status": "missing_token" | "error", "detail": ...}.
-    Token: `claude auth login` (auto-read) or env CLAUDE_CODE_OAUTH_TOKEN
-    or write it to ~/.claude_oauth_token.
-    """
-    tok = claude_token(home, isolated=isolated)
-    if not tok:
-        if claude_has_creds(home, isolated=isolated):
-            return {"status": "expired"}
-        return {"status": "missing_token"}
-    try:
-        req = urllib.request.Request(
-            CLAUDE_USAGE_URL,
-            headers={
-                "Authorization": f"Bearer {tok}",
-                "anthropic-beta": CLAUDE_USAGE_BETA,
-                "Content-Type": "application/json",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=10) as res:
-            data = json.loads(res.read().decode("utf-8", "ignore"))
-        if not isinstance(data, dict):
-            return {"status": "error", "detail": "unexpected response"}
-        return {
-            "status": "ok",
-            "five_hour": data.get("five_hour") or {},
-            "seven_day": data.get("seven_day") or {},
-            "seven_day_opus": data.get("seven_day_opus") or {},
-            "seven_day_sonnet": data.get("seven_day_sonnet") or {},
-        }
-    except Exception as e:
-        return {"status": "error", "detail": f"{type(e).__name__}: {e}"}
+    return {"status": "unsupported", "detail": "Use documented Claude statusline numeric export"}
 
 
 def main() -> int:
@@ -640,7 +572,7 @@ def main() -> int:
     codex, claude = normalize_snapshot(codex, claude)
 
     if args.json:
-        print(json.dumps({"codex": codex, "claude": claude}, ensure_ascii=False, indent=2))
+        print(json.dumps({"codex": codex, "claude": claude}, ensure_ascii=True, indent=2))
         return 0
 
     rl = codex.get("rate_limits", {}) or {}
@@ -674,7 +606,7 @@ def main() -> int:
         if ctx:
             print(f"  context : {ctx['pct']}% ({fmt_num(ctx['input'])}/{fmt_num(ctx['window'])})")
     else:
-        print("  rate-limit: no history")
+        print(f"  rate-limit: unavailable ({codex.get('usage_detail') or 'no history'})")
     print(f"[Claude] transcripts: {claude['files']} messages: {claude['messages']} (src: ~/.claude/projects)")
     if claude["files"] <= 1:
         print("  NOTE: local history was auto-cleaned; real usage is NOT reflected")
@@ -715,7 +647,7 @@ def main() -> int:
             except (TypeError, ValueError):
                 print(f"  {label:<8}: -")
     elif oauth.get("status") == "missing_token":
-        print("  subscription usage: no token. Run `claude auth login` once.")
+        print("  subscription usage: no observation. Configure numeric statusline export in the GUI settings and use official Claude Code.")
     elif oauth.get("status") == "expired":
         print("  subscription usage: token expired, auto-refresh failed.")
         print("  Use claude once (or wait); next refresh retries automatically.")

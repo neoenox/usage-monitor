@@ -15,16 +15,11 @@ def test_set_autostart_preserves_source_mode_tray_arg(tmp_path, monkeypatch):
         lambda: [r"C:\Python311\python.exe", r"C:\repo\gui.py", "--tray"],
     )
 
-    def fake_run(args, **kwargs):
-        captured["args"] = args
-        return None
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
+    import windows_shortcut
+    monkeypatch.setattr(windows_shortcut, 'create', lambda *args: captured.update(args=args))
     assert gui.set_autostart(True) is True
-    ps = captured["args"][-1]
-    assert r"C:\repo\gui.py" in ps
-    assert "--tray" in ps
+    assert r"C:\repo\gui.py" in captured['args'][2]
+    assert '--tray' in captured['args'][2]
 
 
 def test_schedule_tick_cancels_previous_job():
@@ -51,6 +46,33 @@ def test_schedule_tick_cancels_previous_job():
     assert len(dummy.scheduled) == 1
     assert dummy.scheduled[0][0] == 60_000
     assert dummy._tick_job == "new"
+
+
+def test_refresh_ignores_overlapping_request(monkeypatch):
+    class Dummy:
+        _loading = True
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Overlapping refresh started")
+    monkeypatch.setattr(gui.threading, "Thread", unexpected)
+    gui.App.refresh(Dummy())
+
+
+def test_tick_auto_refreshes_even_without_codex_data(monkeypatch):
+    import time
+    class Label:
+        def config(self, **kwargs): pass
+    class Dummy:
+        _updated_at = 0
+        _last = ({"has_rate": False}, {})
+        freshness = Label()
+        refreshed = scheduled = 0
+        def refresh(self): self.refreshed += 1
+        def _schedule_tick(self): self.scheduled += 1
+    monkeypatch.setattr(time, "monotonic", lambda: 301)
+    obj = Dummy()
+    gui.App._tick(obj)
+    assert obj.refreshed == 1
+    assert obj.scheduled == 1
 
 
 def test_remaining_text_separates_value_and_reset():
@@ -95,3 +117,18 @@ def test_quota_forecast_distinguishes_safe_and_exhaustion(monkeypatch):
     assert gui.quota_forecast(100, 300, 25000) == "利用上限に達しています"
     assert gui.quota_forecast(20, 300, 19000) == "リセット後のデータを待っています"
     assert gui.quota_forecast(20, 300, 25000, [(18800, 30), (20000, 20)]) == "履歴不足で予測できません"
+
+
+def test_bad_remaining_numeric_value_is_not_parsed():
+    assert gui.remaining_text("残り1..2% (使用20%)")[0] == ""
+
+
+def test_shortcut_path_quote_is_escaped(tmp_path, monkeypatch):
+    import subprocess
+    captured = []
+    monkeypatch.setattr(gui, "startup_dir", lambda: tmp_path / "don'tbreak")
+    monkeypatch.setattr(gui, "autostart_target", lambda: ["C:/python.exe", "--tray"])
+    import windows_shortcut
+    monkeypatch.setattr(windows_shortcut, 'create', lambda *args: captured.append(args))
+    assert gui.set_autostart(True)
+    assert "don'tbreak" in str(captured[0][0])
