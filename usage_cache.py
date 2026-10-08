@@ -54,6 +54,7 @@ def apply(codex: dict, claude: dict, path: Path, now=None):
                 if name == 'codex':
                     data['has_rate'] = True
                 else:
+                    data['quota_source'] = previous.get('quota_source', 'legacy_cache')
                     data['fetch_status'] = (claude.get('oauth') or {}).get('status')
                     data[source]['status'] = 'ok'
     if dirty:

@@ -513,7 +513,7 @@ class App(tk.Tk):
         self.status.config(text="更新しました（Codexは公式アカウントから取得）" if codex.get("usage_status") == "ok"
                            else "更新しました（Codex使用量は未取得）" if not codex.get("has_rate")
                            else "更新しました（Codexはローカル履歴）")
-        if codex.get("quota_cached") or claude.get("quota_cached"):
+        if codex.get("quota_cached") or (claude.get("quota_cached") and claude.get("quota_source") != "statusline"):
             self.status.config(text="更新失敗：前回取得値を表示しています")
             self.freshness.config(text="表示は前回成功時の値です（各枠の取得日時を参照）")
         if getattr(self, "tray", None):
