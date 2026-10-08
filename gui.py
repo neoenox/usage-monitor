@@ -123,7 +123,7 @@ def history_snapshot(codex: dict, p_used: float, s_used: float,
     """Build only history samples that were actually observed."""
     metrics: dict[str, float] = {}
     resets: dict[str, int | None] = {}
-    if codex.get("has_rate"):
+    if codex.get("has_rate") and not codex.get("quota_cached"):
         metrics.update({"codex_5h": p_used, "codex_wk": s_used})
         pri, sec = pri or {}, sec or {}
         resets.update({
@@ -385,6 +385,8 @@ class App(tk.Tk):
         home = Path.home()
         codex = m.scan_codex(home)
         claude = m.scan_claude(home)
+        import usage_cache
+        codex, claude = usage_cache.apply(codex, claude, h.db_path().parent / "last-usage.json")
         self.after(0, lambda: self._render(codex, claude))
 
     def _render(self, codex: dict, claude: dict) -> None:
@@ -419,6 +421,10 @@ class App(tk.Tk):
             self.barW["value"] = 0
             self.lbl5.config(text=codex.get("usage_detail") or "未連携: 公式Codexでログイン後に「更新」")
             self.lblW.config(text="")
+        if codex.get("quota_cached"):
+            import usage_cache
+            self.lbl5.config(text=usage_cache.label(p_used, pri.get("resets_at"), codex["observed_at"]))
+            self.lblW.config(text=usage_cache.label(s_used, sec.get("resets_at"), codex["observed_at"]))
         ctx = codex.get("context", {}) or {}
         if ctx:
             self.barCtx["value"] = ctx["pct"]
@@ -476,6 +482,14 @@ class App(tk.Tk):
             self.cl_lblW.config(text="")
             self.cl_models.config(text="")
 
+        if claude.get("quota_cached"):
+            import usage_cache
+            for lbl, key in ((self.cl_lbl5, "five_hour"), (self.cl_lblW, "seven_day")):
+                w = oauth[key]
+                lbl.config(text=usage_cache.label(w["utilization"], w.get("resets_at"), claude["observed_at"]))
+            self.cl_models.config(text="前回取得値（オフライン参考値）")
+            cl5 = clw = None
+
         # 履歴記録＋グラフ
         try:
             metrics, resets = history_snapshot(codex, p_used, s_used, cl5, clw, pri, sec)
@@ -492,6 +506,9 @@ class App(tk.Tk):
         self.status.config(text="更新しました（Codexは公式アカウントから取得）" if codex.get("usage_status") == "ok"
                            else "更新しました（Codex使用量は未取得）" if not codex.get("has_rate")
                            else "更新しました（Codexはローカル履歴）")
+        if codex.get("quota_cached") or claude.get("quota_cached"):
+            self.status.config(text="更新失敗：前回取得値を表示しています")
+            self.freshness.config(text="表示は前回成功時の値です（各枠の取得日時を参照）")
         if getattr(self, "tray", None):
             self.tray.update_from(codex, claude)
         self._schedule_tick()
@@ -541,6 +558,19 @@ class App(tk.Tk):
             self._schedule_tick()
             return
         codex, claude = self._last
+        if codex.get("quota_cached") or claude.get("quota_cached"):
+            import usage_cache
+            for data, source, field, rows in (
+                (codex, "rate_limits", "used_percent", ((self.lbl5, "primary"), (self.lblW, "secondary"))),
+                (claude, "oauth", "utilization", ((self.cl_lbl5, "five_hour"), (self.cl_lblW, "seven_day"))),
+            ):
+                if data.get("quota_cached"):
+                    for lbl, key in rows:
+                        w = data[source][key]
+                        lbl.config(text=usage_cache.label(w[field], w.get("resets_at"), data["observed_at"]))
+            self.freshness.config(text="表示は前回成功時の値です（各枠の取得日時を参照）")
+            self._schedule_tick()
+            return
         codex, _ = m.normalize_snapshot(codex, {})
         self._last = (codex, claude)
         if not codex.get("has_rate"):
@@ -720,6 +750,10 @@ def tray_tooltip(codex: dict, claude: dict) -> str:
         cl = f"Claude 5h残り{left('five_hour')} / 週残り{left('seven_day')}"
     else:
         cl = "Claude サブスク未取得"
+    if codex.get("quota_cached"):
+        cx += "（前回取得値）"
+    if claude.get("quota_cached"):
+        cl += "（前回取得値）"
     return f"{cx}\n{cl}"
 
 
@@ -781,14 +815,14 @@ class TrayController:
         if all(v is None for v in yesterday.values()):
             return
         verdicts = {}
-        sec = (codex.get("rate_limits", {}) or {}).get("secondary", {}) or {}
+        sec = ((codex.get("rate_limits", {}) or {}).get("secondary", {}) or {}) if not codex.get("quota_cached") else {}
         try:
             verdicts["codex_wk"] = m.week_pace(float(sec.get("used_percent")), 10080,
                                                sec.get("resets_at"))
         except (TypeError, ValueError):
             pass
         oauth = claude.get("oauth", {}) or {}
-        if oauth.get("status") == "ok":
+        if oauth.get("status") == "ok" and not claude.get("quota_cached"):
             w = oauth.get("seven_day", {}) or {}
             try:
                 verdicts["claude_wk"] = m.week_pace(
@@ -817,7 +851,7 @@ class TrayController:
         from datetime import datetime
 
         metrics: list[tuple[str, float, str]] = []
-        rl = (codex.get("rate_limits", {}) or {}) if codex.get("has_rate") else {}
+        rl = (codex.get("rate_limits", {}) or {}) if codex.get("has_rate") and not codex.get("quota_cached") else {}
         for name, key, fmter in (
             ("Codex 5h", "primary", m.fmt_ts),
             ("Codex 週", "secondary", m.fmt_ts),
@@ -829,7 +863,7 @@ class TrayController:
                 continue
             metrics.append((name, left, f"リセット{fmter(w.get('resets_at'))}"))
         oauth = claude.get("oauth", {}) or {}
-        if oauth.get("status") == "ok":
+        if oauth.get("status") == "ok" and not claude.get("quota_cached"):
             for name, key in (("Claude 5h", "five_hour"), ("Claude 週", "seven_day")):
                 w = oauth.get(key, {}) or {}
                 try:

@@ -17,7 +17,7 @@ import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CLAUDE_USAGE_BETA = "oauth-2025-04-20"
@@ -61,13 +61,13 @@ def normalize_snapshot(codex: dict, claude: dict) -> tuple[dict, dict]:
     rl = codex.get("rate_limits", {}) or {}
     for key, flag in (("primary", "new_window_5h"), ("secondary", "new_window_wk")):
         w = rl.get(key, {}) or {}
-        if w.get("resets_at") and is_stale(w.get("resets_at")):
+        if not codex.get("quota_cached") and w.get("resets_at") and is_stale(w.get("resets_at")):
             codex["has_rate"] = False
             if codex.get("usage_status") in (None, "ok", "local_history"):
                 codex["usage_status"] = "stale"
                 codex["usage_detail"] = "リセット後の最新データを取得できていません"
     oauth = claude.get("oauth", {}) or {}
-    if oauth.get("status") == "ok":
+    if oauth.get("status") == "ok" and not claude.get("quota_cached"):
         for key, flag in (("five_hour", "new_window_5h"), ("seven_day", "new_window_wk")):
             w = oauth.get(key, {}) or {}
             if w.get("resets_at") and is_stale(w.get("resets_at")):
