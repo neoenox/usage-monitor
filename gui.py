@@ -125,7 +125,7 @@ def average_usage_text(used, window_min, reset_epoch, hist=(), *, allowance=None
         result = f"{prefix}{rate:.1f}% / {unit}"
         if allowance is not None:
             status = "上限到達" if used >= 100 else "目安内" if rate <= allowance else "目安超過"
-            result += f" ・ 利用目安：{allowance:.1f}% / {unit}まで（{status}）"
+            result += f"\n利用目安：{allowance:.1f}% / {unit}まで（{status}）"
         return result
     except (TypeError, ValueError, OverflowError):
         return prefix + "データ不足"
@@ -152,7 +152,7 @@ def usage_pacing_text(used, window_min, reset_epoch, hist=()) -> str:
         if "利用目安：" in average:
             return average
         status = "（上限到達）" if used >= 100 else ""
-        return f"{average} ・ 利用目安：{allowance:.1f}% / {unit}まで{status}"
+        return f"{average}\n利用目安：{allowance:.1f}% / {unit}まで{status}"
     except (TypeError, ValueError, OverflowError):
         return average_usage_text(used, window_min, reset_epoch, hist)
 

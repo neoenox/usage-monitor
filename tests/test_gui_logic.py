@@ -154,15 +154,15 @@ def test_average_usage_flat_and_invalid(monkeypatch):
 def test_pacing_allowance_and_comparison(monkeypatch):
     monkeypatch.setattr("time.time", lambda: 2000000)
     hist = [(1996400, 10), (2000000, 30)]
-    assert gui.usage_pacing_text(30, 300, 2012600, hist) == "平均使用率：20.0% / 時間 ・ 利用目安：20.0% / 時間まで（目安内）"
-    assert gui.usage_pacing_text(40, 300, 2010800, [(1996400, 10), (2000000, 40)]) == "平均使用率：30.0% / 時間 ・ 利用目安：20.0% / 時間まで（目安超過）"
-    assert gui.usage_pacing_text(40, 10080, 2259200, [(1913600, 20), (2000000, 40)]) == "平均使用率：20.0% / 日 ・ 利用目安：20.0% / 日まで（目安内）"
+    assert gui.usage_pacing_text(30, 300, 2012600, hist) == "平均使用率：20.0% / 時間\n利用目安：20.0% / 時間まで（目安内）"
+    assert gui.usage_pacing_text(40, 300, 2010800, [(1996400, 10), (2000000, 40)]) == "平均使用率：30.0% / 時間\n利用目安：20.0% / 時間まで（目安超過）"
+    assert gui.usage_pacing_text(40, 10080, 2259200, [(1913600, 20), (2000000, 40)]) == "平均使用率：20.0% / 日\n利用目安：20.0% / 日まで（目安内）"
 
 
 def test_pacing_allowance_without_history_and_after_reset(monkeypatch):
     monkeypatch.setattr("time.time", lambda: 2000000)
-    assert gui.usage_pacing_text(40, 300, 2010800, []) == "平均使用率：履歴不足 ・ 利用目安：20.0% / 時間まで"
-    assert gui.usage_pacing_text(100, 300, 2010800, []) == "平均使用率：履歴不足 ・ 利用目安：0.0% / 時間まで（上限到達）"
+    assert gui.usage_pacing_text(40, 300, 2010800, []) == "平均使用率：履歴不足\n利用目安：20.0% / 時間まで"
+    assert gui.usage_pacing_text(100, 300, 2010800, []) == "平均使用率：履歴不足\n利用目安：0.0% / 時間まで（上限到達）"
     assert "利用目安" not in gui.usage_pacing_text(40, 300, 2000000, [])
     assert "利用目安" not in gui.usage_pacing_text(float("nan"), 300, 2010800, [])
 
