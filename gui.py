@@ -86,6 +86,51 @@ def quota_forecast(used, window_min, reset_epoch, hist=(), show_date=True) -> st
     return m.quota_forecast(used, window_min, reset_epoch, hist, show_date)
 
 
+def average_usage_text(used, window_min, reset_epoch, hist=()) -> str:
+    """Average observed quota consumption within the latest continuous window."""
+    import math
+    import time
+
+    prefix = "平均使用率："
+    now = time.time()
+    try:
+        if any(isinstance(v, bool) for v in (used, window_min, reset_epoch)):
+            return prefix + "データ不足"
+        used, window_min, reset_epoch = map(float, (used, window_min, reset_epoch))
+        if not all(math.isfinite(v) for v in (used, window_min, reset_epoch)) or not 0 <= used <= 100 or window_min <= 0:
+            return prefix + "データ不足"
+        if reset_epoch <= now:
+            return prefix + "リセット後の取得待ち"
+        start = reset_epoch - window_min * 60
+        points = []
+        for t, u in hist:
+            if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in (t, u)) or not 0 <= u <= 100:
+                return prefix + "履歴不足"
+            if start <= t <= now:
+                points.append((t, u))
+        points.sort()
+        segment = []
+        for point in points:
+            if segment and point[1] < segment[-1][1]:
+                segment = []
+            segment.append(point)
+        if segment and used < segment[-1][1]:
+            return prefix + "履歴不足"
+        if segment and used > segment[-1][1] and now > segment[-1][0]:
+            segment.append((now, used))
+        if len(segment) < 2 or segment[-1][0] - segment[0][0] < 600:
+            return prefix + "履歴不足"
+        unit_seconds, unit = (3600, "時間") if window_min <= 300 else (86400, "日")
+        rate = (segment[-1][1] - segment[0][1]) * unit_seconds / (segment[-1][0] - segment[0][0])
+        return f"{prefix}{rate:.1f}% / {unit}"
+    except (TypeError, ValueError, OverflowError):
+        return prefix + "データ不足"
+
+
+def usage_detail(used, window_min, reset_epoch, metric, forecast):
+    return forecast + "\n" + average_usage_text(used, window_min, reset_epoch, h.recent(metric))
+
+
 
 def history_snapshot(codex: dict, p_used: float, s_used: float,
                      cl5: float | None = None, clw: float | None = None,
@@ -430,12 +475,14 @@ class App(tk.Tk):
             self.bar5["value"] = 100 - p_used
             self.lbl5.config(text=self._codex_label(
                 "5h", p_used, pri.get("resets_at"), m.fmt_ts,
-                quota_forecast(p_used, 300, pri.get("resets_at"), h.recent("codex_5h"), False),
+                usage_detail(p_used, 300, pri.get("resets_at"), "codex_5h",
+                             quota_forecast(p_used, 300, pri.get("resets_at"), h.recent("codex_5h"), False)),
                 codex.get("new_window_5h", False)))
             self.barW["value"] = 100 - s_used
             self.lblW.config(text=self._codex_label(
                 "週", s_used, sec.get("resets_at"), m.fmt_ts,
-                m.week_status(s_used, sec.get("resets_at")),
+                usage_detail(s_used, 10080, sec.get("resets_at"), "codex_wk",
+                             m.week_status(s_used, sec.get("resets_at"))),
                 codex.get("new_window_wk", False)))
         else:
             self.bar5["value"] = 0
@@ -477,6 +524,9 @@ class App(tk.Tk):
                                         h.recent("claude_5h"), show_date=False)
                 else:
                     pace = m.week_status(used, m.iso_to_epoch(w.get("resets_at")))
+                pace = usage_detail(used, 300 if key == "five_hour" else 10080,
+                                    m.iso_to_epoch(w.get("resets_at")),
+                                    "claude_5h" if key == "five_hour" else "claude_wk", pace)
                 extra = ""
                 if claude.get(flag):
                     extra += "（新窓）"
@@ -610,11 +660,13 @@ class App(tk.Tk):
             pu, su = float(pri.get("used_percent") or 0), float(sec.get("used_percent") or 0)
             self.lbl5.config(text=self._codex_label(
                 "5h", pu, pri.get("resets_at"), m.fmt_ts,
-                quota_forecast(pu, 300, pri.get("resets_at"), h.recent("codex_5h"), False),
+                usage_detail(pu, 300, pri.get("resets_at"), "codex_5h",
+                             quota_forecast(pu, 300, pri.get("resets_at"), h.recent("codex_5h"), False)),
                 codex.get("new_window_5h", False)))
             self.lblW.config(text=self._codex_label(
                 "週", su, sec.get("resets_at"), m.fmt_ts,
-                m.week_status(su, sec.get("resets_at")),
+                usage_detail(su, 10080, sec.get("resets_at"), "codex_wk",
+                             m.week_status(su, sec.get("resets_at"))),
                 codex.get("new_window_wk", False)))
         except (TypeError, ValueError):
             pass
@@ -631,6 +683,9 @@ class App(tk.Tk):
                                             h.recent("claude_5h"), show_date=False)
                     else:
                         pace = m.week_status(used, m.iso_to_epoch(w.get("resets_at")))
+                    pace = usage_detail(used, 300 if key == "five_hour" else 10080,
+                                        m.iso_to_epoch(w.get("resets_at")),
+                                        "claude_5h" if key == "five_hour" else "claude_wk", pace)
                     extra = ""
                     if claude.get(flag):
                         extra += "（新窓）"

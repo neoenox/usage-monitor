@@ -132,3 +132,48 @@ def test_shortcut_path_quote_is_escaped(tmp_path, monkeypatch):
     monkeypatch.setattr(windows_shortcut, 'create', lambda *args: captured.append(args))
     assert gui.set_autostart(True)
     assert "don'tbreak" in str(captured[0][0])
+
+
+def test_average_usage_per_hour_and_day(monkeypatch):
+    monkeypatch.setattr("time.time", lambda: 2000000)
+    assert gui.average_usage_text(30, 300, 2003600, [(1996400, 10), (2000000, 30)]) == "平均使用率：20.0% / 時間"
+    assert gui.average_usage_text(40, 10080, 2086400, [(1913600, 20), (2000000, 40)]) == "平均使用率：20.0% / 日"
+
+def test_average_usage_ignores_pre_reset_history(monkeypatch):
+    monkeypatch.setattr("time.time", lambda: 2000000)
+    assert gui.average_usage_text(15, 300, 2003600, [(1992800, 90), (1996400, 5), (2000000, 15)]) == "平均使用率：10.0% / 時間"
+    assert gui.average_usage_text(15, 300, 2003600, [(2000000, 15)]) == "平均使用率：履歴不足"
+    assert gui.average_usage_text(15, 300, 1999999, [(1996400, 5), (2000000, 15)]) == "平均使用率：リセット後の取得待ち"
+
+def test_average_usage_flat_and_invalid(monkeypatch):
+    monkeypatch.setattr("time.time", lambda: 2000000)
+    assert gui.average_usage_text(15, 300, 2003600, [(1996400, 15), (2000000, 15)]) == "平均使用率：0.0% / 時間"
+    assert gui.average_usage_text(float("nan"), 300, 2003600, []) == "平均使用率：データ不足"
+
+
+def test_average_usage_visible_for_both_providers_and_survives_tick(app, monkeypatch, fake_home):
+    from datetime import datetime, timezone
+
+    now = 2000000
+    monkeypatch.setattr("time.time", lambda: now)
+    monkeypatch.setattr(gui.h, "recent", lambda metric, **kwargs: [(now - 3600, 10), (now, 30)])
+    monkeypatch.setattr(app, "refresh", lambda: None)
+    monkeypatch.setattr(app, "_schedule_tick", lambda: None)
+    reset = now + 3600
+    iso = datetime.fromtimestamp(reset, timezone.utc).isoformat()
+    codex = gui.m.scan_codex(fake_home)
+    codex.update({"has_rate": True, "rate_limits": {
+        "primary": {"used_percent": 30, "resets_at": reset},
+        "secondary": {"used_percent": 30, "resets_at": reset}}})
+    claude = gui.m.scan_claude(fake_home)
+    claude.update({"oauth": {"status": "ok", "five_hour": {"utilization": 30, "resets_at": iso},
+                         "seven_day": {"utilization": 30, "resets_at": iso}}})
+    app._render(codex, claude)
+    app.update_idletasks()
+    for label in (app.lbl5, app.cl_lbl5):
+        assert "平均使用率：20.0% / 時間" in label.detail.cget("text")
+    for label in (app.lblW, app.cl_lblW):
+        assert "平均使用率：480.0% / 日" in label.detail.cget("text")
+    app._tick()
+    for label in (app.lbl5, app.cl_lbl5, app.lblW, app.cl_lblW):
+        assert "平均使用率：" in label.detail.cget("text")

@@ -63,7 +63,7 @@ python -m pytest tests -q
 3. Claude Codeを再起動して通常利用する。公式statuslineのデータがないプラン・セッションでは未取得になる。使用率取得のためだけにモデルを呼び出さない。
 4. 解除・アンインストール前に「以前のstatuslineを復元」を選ぶ。他の設定は維持し、後からユーザーが変更したstatuslineは上書きしない。
 
-配布時の認証条件と制約は [DISTRIBUTION.md](DISTRIBUTION.md) を参照。
+配布時の認証条件と制約は [DISTRIBUTION.md](docs/DISTRIBUTION.md) を参照。
 - トレイ常駐: ホバー表示、残量20%/10%でバルーン通知、5分毎に自動更新、自動起動ON/OFF
 
 ## exe化
@@ -74,3 +74,13 @@ python -m pytest tests -q
 pip install pyinstaller
 ./build.ps1
 ```
+
+## フォルダー構成
+
+- ルート: 起動用プログラム・設定・ビルド手順
+- docs/: 配布条件・検証記録・ロールバック記録
+- tests/: テスト
+- assets/: アイコン素材
+- outputs/: 作業記録（screenshots / backups / diagnostics / reviews）
+- build/: ビルド中間ファイル
+- dist/: 起動用exe
