@@ -151,6 +151,29 @@ def test_average_usage_flat_and_invalid(monkeypatch):
     assert gui.average_usage_text(float("nan"), 300, 2003600, []) == "平均使用率：データ不足"
 
 
+def test_pacing_allowance_and_comparison(monkeypatch):
+    monkeypatch.setattr("time.time", lambda: 2000000)
+    hist = [(1996400, 10), (2000000, 30)]
+    assert gui.usage_pacing_text(30, 300, 2012600, hist) == "平均使用率：20.0% / 時間 ・ 利用目安：20.0% / 時間まで（目安内）"
+    assert gui.usage_pacing_text(40, 300, 2010800, [(1996400, 10), (2000000, 40)]) == "平均使用率：30.0% / 時間 ・ 利用目安：20.0% / 時間まで（目安超過）"
+    assert gui.usage_pacing_text(40, 10080, 2259200, [(1913600, 20), (2000000, 40)]) == "平均使用率：20.0% / 日 ・ 利用目安：20.0% / 日まで（目安内）"
+
+
+def test_pacing_allowance_without_history_and_after_reset(monkeypatch):
+    monkeypatch.setattr("time.time", lambda: 2000000)
+    assert gui.usage_pacing_text(40, 300, 2010800, []) == "平均使用率：履歴不足 ・ 利用目安：20.0% / 時間まで"
+    assert gui.usage_pacing_text(100, 300, 2010800, []) == "平均使用率：履歴不足 ・ 利用目安：0.0% / 時間まで（上限到達）"
+    assert "利用目安" not in gui.usage_pacing_text(40, 300, 2000000, [])
+    assert "利用目安" not in gui.usage_pacing_text(float("nan"), 300, 2010800, [])
+
+
+def test_pacing_allowance_updates_with_remaining_time(monkeypatch):
+    monkeypatch.setattr("time.time", lambda: 2000000)
+    assert "20.0% / 時間まで" in gui.usage_pacing_text(40, 300, 2010800, [])
+    monkeypatch.setattr("time.time", lambda: 2003600)
+    assert "30.0% / 時間まで" in gui.usage_pacing_text(40, 300, 2010800, [])
+
+
 def test_average_usage_visible_for_both_providers_and_survives_tick(app, monkeypatch, fake_home):
     from datetime import datetime, timezone
 
@@ -172,8 +195,11 @@ def test_average_usage_visible_for_both_providers_and_survives_tick(app, monkeyp
     app.update_idletasks()
     for label in (app.lbl5, app.cl_lbl5):
         assert "平均使用率：20.0% / 時間" in label.detail.cget("text")
+        assert "利用目安：70.0% / 時間まで（目安内）" in label.detail.cget("text")
     for label in (app.lblW, app.cl_lblW):
         assert "平均使用率：480.0% / 日" in label.detail.cget("text")
+        assert "利用目安：1680.0% / 日まで（目安内）" in label.detail.cget("text")
     app._tick()
     for label in (app.lbl5, app.cl_lbl5, app.lblW, app.cl_lblW):
         assert "平均使用率：" in label.detail.cget("text")
+        assert "利用目安：" in label.detail.cget("text")

@@ -86,7 +86,7 @@ def quota_forecast(used, window_min, reset_epoch, hist=(), show_date=True) -> st
     return m.quota_forecast(used, window_min, reset_epoch, hist, show_date)
 
 
-def average_usage_text(used, window_min, reset_epoch, hist=()) -> str:
+def average_usage_text(used, window_min, reset_epoch, hist=(), *, allowance=None) -> str:
     """Average observed quota consumption within the latest continuous window."""
     import math
     import time
@@ -122,13 +122,43 @@ def average_usage_text(used, window_min, reset_epoch, hist=()) -> str:
             return prefix + "履歴不足"
         unit_seconds, unit = (3600, "時間") if window_min <= 300 else (86400, "日")
         rate = (segment[-1][1] - segment[0][1]) * unit_seconds / (segment[-1][0] - segment[0][0])
-        return f"{prefix}{rate:.1f}% / {unit}"
+        result = f"{prefix}{rate:.1f}% / {unit}"
+        if allowance is not None:
+            status = "上限到達" if used >= 100 else "目安内" if rate <= allowance else "目安超過"
+            result += f" ・ 利用目安：{allowance:.1f}% / {unit}まで（{status}）"
+        return result
     except (TypeError, ValueError, OverflowError):
         return prefix + "データ不足"
 
 
+def usage_pacing_text(used, window_min, reset_epoch, hist=()) -> str:
+    """Compare observed consumption with the remaining budget until reset."""
+    import math
+    import time
+
+    try:
+        if any(isinstance(v, bool) for v in (used, window_min, reset_epoch)):
+            raise ValueError
+        used, window_min, reset_epoch = map(float, (used, window_min, reset_epoch))
+        if not all(math.isfinite(v) for v in (used, window_min, reset_epoch)) or not 0 <= used <= 100 or window_min <= 0:
+            raise ValueError
+        remaining = reset_epoch - time.time()
+        if remaining <= 0:
+            raise ValueError
+        unit_seconds, unit = (3600, "時間") if window_min <= 300 else (86400, "日")
+        # Round the allowance down so the displayed target never overstates it.
+        allowance = math.floor((100 - used) * unit_seconds / remaining * 10) / 10
+        average = average_usage_text(used, window_min, reset_epoch, hist, allowance=allowance)
+        if "利用目安：" in average:
+            return average
+        status = "（上限到達）" if used >= 100 else ""
+        return f"{average} ・ 利用目安：{allowance:.1f}% / {unit}まで{status}"
+    except (TypeError, ValueError, OverflowError):
+        return average_usage_text(used, window_min, reset_epoch, hist)
+
+
 def usage_detail(used, window_min, reset_epoch, metric, forecast):
-    return forecast + "\n" + average_usage_text(used, window_min, reset_epoch, h.recent(metric))
+    return forecast + "\n" + usage_pacing_text(used, window_min, reset_epoch, h.recent(metric))
 
 
 
