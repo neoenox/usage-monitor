@@ -597,8 +597,71 @@ def _resolve_oauth_access(oauth: dict) -> str:
     return _refresh_oauth(refresh)
 
 
+CLAUDE_REFRESH_COOLDOWN_S = 3600  # rate-limit(429)後の再試行抑制
+CLAUDE_REFRESH_RETRY_S = 600  # その他失敗後の再試行抑制
+
+
+def _refresh_backoff_path() -> Path:
+    d = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "usage-monitor"
+    return d / ".claude-refresh-backoff.json"
+
+
+def _refresh_backoff_state(now: float | None = None) -> tuple[bool, bool]:
+    """(抑制中か, rate-limit起因か)を返す。ファイル異常時は (False, False)。"""
+    import time as _time
+
+    now = _time.time() if now is None else now
+    try:
+        raw = json.loads(_refresh_backoff_path().read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            return False, False
+        failed_at = float(raw.get("failed_at") or 0)
+        cooldown = float(raw.get("cooldown") or 0)
+        if not (failed_at > 0 and cooldown > 0):
+            return False, False
+        if failed_at + cooldown <= now:
+            return False, False
+        return True, bool(raw.get("rate_limited"))
+    except (OSError, ValueError, TypeError):
+        return False, False
+
+
+def _refresh_backoff_active(now: float | None = None) -> bool:
+    """直近のrefresh失敗が抑制期間内ならTrue。ファイル異常時は抑制しない。"""
+    active, _ = _refresh_backoff_state(now)
+    return active
+
+
+def _record_refresh_failure(rate_limited: bool) -> None:
+    """refresh失敗を記録し、次回までネットワーク再試行を抑止する。"""
+    import time as _time
+
+    cooldown = CLAUDE_REFRESH_COOLDOWN_S if rate_limited else CLAUDE_REFRESH_RETRY_S
+    try:
+        p = _refresh_backoff_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"failed_at": _time.time(), "cooldown": cooldown,
+                                 "rate_limited": bool(rate_limited)}),
+                     encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _clear_refresh_backoff() -> None:
+    try:
+        _refresh_backoff_path().unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _refresh_oauth(refresh: str) -> str:
-    """リフレッシュ1回のみ (リトライループ禁止: エンドポイントが厳格)。"""
+    """リフレッシュ1回のみ (リトライループ禁止: エンドポイントが厳格)。
+
+    直近に失敗しているときはネットワークに出ずに空文字を返す。
+    429を繰り返し叩いてrate-limitを悪化させないための抑止。
+    """
+    if _refresh_backoff_active():
+        return ""
     try:
         body = json.dumps(
             {
@@ -614,8 +677,17 @@ def _refresh_oauth(refresh: str) -> str:
         )
         with urllib.request.urlopen(req, timeout=10) as res:
             data = json.loads(res.read().decode("utf-8", "ignore"))
-        return str(data.get("access_token") or "")
-    except Exception:
+        tok = str(data.get("access_token") or "")
+        if tok:
+            _clear_refresh_backoff()
+            return tok
+        _record_refresh_failure(False)
+        return ""
+    except Exception as e:
+        rate_limited = getattr(e, "code", None) == 429
+        if "429" in type(e).__name__ or "429" in str(e):
+            rate_limited = True
+        _record_refresh_failure(rate_limited)
         return ""
 
 
@@ -693,6 +765,10 @@ def fetch_claude_oauth(home: Path, *, isolated: bool = False) -> dict:
     tok = claude_token(home, isolated=isolated)
     if not tok:
         if claude_has_creds(home, isolated=isolated):
+            active, limited = _refresh_backoff_state()
+            if active:
+                detail = "rate_limited_retry_later" if limited else "refresh_retry_later"
+                return {"status": "expired", "detail": detail}
             return {"status": "expired"}
         return {"status": "missing_token"}
     try:
@@ -708,6 +784,7 @@ def fetch_claude_oauth(home: Path, *, isolated: bool = False) -> dict:
             data = json.loads(res.read().decode("utf-8", "ignore"))
         if not isinstance(data, dict):
             return {"status": "error", "detail": "unexpected response"}
+        _clear_refresh_backoff()  # live取得成功時は古い抑制マーカーを残さない
         return {
             "status": "ok",
             "five_hour": data.get("five_hour") or {},
