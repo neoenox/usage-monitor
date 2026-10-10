@@ -39,6 +39,9 @@ def setup_guidance(codex, claude):
         cl = 'Claude: statusline観測済み（認証状態の直接確認ではありません）。'
     elif (claude.get('oauth') or {}).get('status') == 'ok':
         cl = 'Claude: 使用枠を直接取得成功。'
+    elif (claude.get('oauth') or {}).get('status') == 'expired':
+        cl = ('Claude: 認証期限切れ。見えるターミナルで claude auth login --claudeai を実行し、'
+              'ブラウザ認証後に「更新」で再確認。更新連打はrate-limitを悪化させるためお控えください。')
     else:
         cl = 'Claude: 未取得。公式Claude Codeでclaude auth login後、「更新」で再確認。'
     return cx, cl
@@ -571,7 +574,10 @@ class App(tk.Tk):
             self.cl_bar5["value"] = 0
             self.cl_barW["value"] = 0
             if oauth.get("status") == "expired":
-                self.cl_lbl5.config(text="認証期限切れ: claude auth login で再ログインしてください")
+                if str(oauth.get("detail") or "").endswith("retry_later"):
+                    self.cl_lbl5.config(text="認証期限切れ: refreshがrate-limit中のため再試行を抑制しています。見えるターミナルで claude auth login --claudeai 後に「更新」（連打厳禁）")
+                else:
+                    self.cl_lbl5.config(text="認証期限切れ: 見えるターミナルで claude auth login --claudeai 後に「更新」（更新連打は厳禁）")
             else:
                 self.cl_lbl5.config(text="未取得: 公式Claude Codeでclaude auth login後、更新してください")
             self.cl_lblW.config(text="")
