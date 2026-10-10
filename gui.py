@@ -574,7 +574,7 @@ class App(tk.Tk):
             self.cl_bar5["value"] = 0
             self.cl_barW["value"] = 0
             if oauth.get("status") == "expired":
-                if oauth.get("detail") == "rate_limited_retry_later":
+                if str(oauth.get("detail") or "").endswith("retry_later"):
                     self.cl_lbl5.config(text="認証期限切れ: refreshがrate-limit中のため再試行を抑制しています。見えるターミナルで claude auth login --claudeai 後に「更新」（連打厳禁）")
                 else:
                     self.cl_lbl5.config(text="認証期限切れ: 見えるターミナルで claude auth login --claudeai 後に「更新」（更新連打は厳禁）")

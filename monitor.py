@@ -606,22 +606,30 @@ def _refresh_backoff_path() -> Path:
     return d / ".claude-refresh-backoff.json"
 
 
-def _refresh_backoff_active(now: float | None = None) -> bool:
-    """直近のrefresh失敗が抑制期間内ならTrue。ファイル異常時は抑制しない。"""
+def _refresh_backoff_state(now: float | None = None) -> tuple[bool, bool]:
+    """(抑制中か, rate-limit起因か)を返す。ファイル異常時は (False, False)。"""
     import time as _time
 
     now = _time.time() if now is None else now
     try:
         raw = json.loads(_refresh_backoff_path().read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
-            return False
+            return False, False
         failed_at = float(raw.get("failed_at") or 0)
         cooldown = float(raw.get("cooldown") or 0)
         if not (failed_at > 0 and cooldown > 0):
-            return False
-        return failed_at + cooldown > now
+            return False, False
+        if failed_at + cooldown <= now:
+            return False, False
+        return True, bool(raw.get("rate_limited"))
     except (OSError, ValueError, TypeError):
-        return False
+        return False, False
+
+
+def _refresh_backoff_active(now: float | None = None) -> bool:
+    """直近のrefresh失敗が抑制期間内ならTrue。ファイル異常時は抑制しない。"""
+    active, _ = _refresh_backoff_state(now)
+    return active
 
 
 def _record_refresh_failure(rate_limited: bool) -> None:
@@ -757,8 +765,10 @@ def fetch_claude_oauth(home: Path, *, isolated: bool = False) -> dict:
     tok = claude_token(home, isolated=isolated)
     if not tok:
         if claude_has_creds(home, isolated=isolated):
-            if _refresh_backoff_active():
-                return {"status": "expired", "detail": "rate_limited_retry_later"}
+            active, limited = _refresh_backoff_state()
+            if active:
+                detail = "rate_limited_retry_later" if limited else "refresh_retry_later"
+                return {"status": "expired", "detail": detail}
             return {"status": "expired"}
         return {"status": "missing_token"}
     try:
@@ -774,6 +784,7 @@ def fetch_claude_oauth(home: Path, *, isolated: bool = False) -> dict:
             data = json.loads(res.read().decode("utf-8", "ignore"))
         if not isinstance(data, dict):
             return {"status": "error", "detail": "unexpected response"}
+        _clear_refresh_backoff()  # live取得成功時は古い抑制マーカーを残さない
         return {
             "status": "ok",
             "five_hour": data.get("five_hour") or {},

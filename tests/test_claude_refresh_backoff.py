@@ -85,6 +85,43 @@ def test_fetch_oauth_reports_cooldown_detail(tmp_path, monkeypatch):
     assert out["detail"] == "rate_limited_retry_later"
 
 
+def test_non_rate_limit_failure_reports_retry_detail(tmp_path, monkeypatch):
+    _isolate_backoff(tmp_path, monkeypatch)
+    creds = tmp_path / ".claude" / ".credentials.json"
+    creds.parent.mkdir(parents=True)
+    creds.write_text(json.dumps({"claudeAiOauth": {
+        "accessToken": "old", "refreshToken": "r",
+        "expiresAt": int(time.time() * 1000) - 3600000,
+    }}), encoding="utf-8")
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setattr(m, "claude_token_from_os_store", lambda: "")
+    monkeypatch.setattr(m, "_refresh_oauth", lambda _: "")
+    m._record_refresh_failure(False)
+    out = m.fetch_claude_oauth(tmp_path)
+    assert out == {"status": "expired", "detail": "refresh_retry_later"}
+
+
+def test_successful_usage_clears_stale_backoff(tmp_path, monkeypatch):
+    backoff = _isolate_backoff(tmp_path, monkeypatch)
+    m._record_refresh_failure(True)
+    assert backoff.exists()
+    monkeypatch.setattr(m, "claude_token", lambda home, **kw: "live-token")
+
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps({"five_hour": {}, "seven_day": {}}).encode()
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", lambda req, timeout=10: Resp())
+    assert m.fetch_claude_oauth(tmp_path)["status"] == "ok"
+    assert not backoff.exists()
+
+
 def test_corrupt_backoff_file_does_not_block(tmp_path, monkeypatch):
     backoff = _isolate_backoff(tmp_path, monkeypatch)
     backoff.parent.mkdir(parents=True, exist_ok=True)
