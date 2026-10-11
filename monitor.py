@@ -21,7 +21,7 @@ __version__ = "0.5.2"
 
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CLAUDE_USAGE_BETA = "oauth-2025-04-20"
-CLAUDE_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
+CLAUDE_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Claude Code public OAuth client
 CLAUDE_CRED_TARGET = "Claude Code-credentials"  # OS credential store service name
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -547,7 +547,7 @@ def claude_token(home: Path, *, isolated: bool = False) -> str:
             p = home / ".claude" / ".credentials.json"
             if p.exists():
                 creds = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
-                tok = _resolve_oauth_access(creds.get("claudeAiOauth") or {})
+                tok = _resolve_oauth_access(creds.get("claudeAiOauth") or {}, credential_path=p)
                 if tok:
                     return tok
                 if _cli_refresh_creds(home):
@@ -580,7 +580,7 @@ def claude_has_creds(home: Path, *, isolated: bool = False) -> bool:
         return False
 
 
-def _resolve_oauth_access(oauth: dict) -> str:
+def _resolve_oauth_access(oauth: dict, *, credential_path: Path | None = None) -> str:
     """Return a live accessToken from a claudeAiOauth dict, refreshing if expired."""
     import time
 
@@ -594,6 +594,8 @@ def _resolve_oauth_access(oauth: dict) -> str:
     refresh = str(oauth.get("refreshToken") or "")
     if not refresh:
         return access  # try anyway; API will tell
+    if credential_path is not None:
+        return _refresh_oauth(refresh, credential_path=credential_path)
     return _refresh_oauth(refresh)
 
 
@@ -614,6 +616,8 @@ def _refresh_backoff_state(now: float | None = None) -> tuple[bool, bool]:
     try:
         raw = json.loads(_refresh_backoff_path().read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
+            return False, False
+        if raw.get('endpoint', 'https://console.anthropic.com/v1/oauth/token') != CLAUDE_TOKEN_URL:
             return False, False
         failed_at = float(raw.get("failed_at") or 0)
         cooldown = float(raw.get("cooldown") or 0)
@@ -641,7 +645,7 @@ def _record_refresh_failure(rate_limited: bool) -> None:
         p = _refresh_backoff_path()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({"failed_at": _time.time(), "cooldown": cooldown,
-                                 "rate_limited": bool(rate_limited)}),
+                                 "rate_limited": bool(rate_limited), 'endpoint': CLAUDE_TOKEN_URL}),
                      encoding="utf-8")
     except OSError:
         pass
@@ -654,7 +658,85 @@ def _clear_refresh_backoff() -> None:
         pass
 
 
-def _refresh_oauth(refresh: str) -> str:
+def _refresh_oauth(refresh: str, *, credential_path: Path | None = None) -> str:
+    """Serialize file-token refresh across monitor processes and re-read credentials."""
+    import time
+
+    if credential_path is None:
+        return _perform_refresh_oauth(refresh)
+    # OS locks are released even if the process crashes. No token goes in the lock.
+    with credential_path.with_suffix('.monitor-lock').open('a+b') as lock:
+        if lock.tell() == 0:
+            lock.write(b'0')
+            lock.flush()
+        lock.seek(0)
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return ''  # Another monitor is refreshing; try its saved token next time.
+        try:
+            latest = json.loads(credential_path.read_text(encoding='utf-8'))['claudeAiOauth']
+            if latest.get('accessToken') and float(latest.get('expiresAt') or 0) > (time.time() + 60) * 1000:
+                return str(latest['accessToken'])
+            refresh = str(latest.get('refreshToken') or '')
+            if not refresh:
+                return ''
+            return _perform_refresh_oauth(refresh, credential_path=credential_path,
+                                          scopes=latest.get('scopes'))
+        finally:
+            if os.name == 'nt':
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _save_refreshed_oauth(path: Path, refresh: str, data: dict) -> str:
+    """Preserve unrelated credentials and do not replace a newer official login."""
+    import math
+    import tempfile
+    import time
+
+    current = json.loads(path.read_text(encoding='utf-8'))
+    oauth = current.get('claudeAiOauth') or {}
+    if oauth.get('refreshToken') != refresh:
+        if float(oauth.get('expiresAt') or 0) > (time.time() + 60) * 1000:
+            return str(oauth.get('accessToken') or '')
+        return ''
+    expires = data.get('expires_in')
+    if isinstance(expires, bool) or not isinstance(expires, (int, float)) or not math.isfinite(expires) or expires <= 60:
+        return ''
+    updated = dict(oauth, accessToken=data['access_token'],
+                   refreshToken=data.get('refresh_token') or refresh,
+                   expiresAt=int((time.time() + expires) * 1000))
+    if isinstance(data.get('scope'), str):
+        updated['scopes'] = data['scope'].split()
+    current['claudeAiOauth'] = updated
+    # mkstemp uses owner-only permissions on POSIX; on Windows the existing
+    # credential directory supplies its inherited user ACL. Always remove temp data.
+    fd, temporary = tempfile.mkstemp(prefix='.credentials-monitor-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            json.dump(current, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Recheck immediately before replacement if official Claude changed login.
+        latest = json.loads(path.read_text(encoding='utf-8'))
+        if latest != dict(current, claudeAiOauth=oauth):
+            latest_oauth = latest.get('claudeAiOauth') or {}
+            return str(latest_oauth.get('accessToken') or '') if float(latest_oauth.get('expiresAt') or 0) > (time.time() + 60) * 1000 else ''
+        os.replace(temporary, path)
+        return str(data['access_token'])
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def _perform_refresh_oauth(refresh: str, *, credential_path: Path | None = None, scopes=None) -> str:
     """リフレッシュ1回のみ (リトライループ禁止: エンドポイントが厳格)。
 
     直近に失敗しているときはネットワークに出ずに空文字を返す。
@@ -663,22 +745,32 @@ def _refresh_oauth(refresh: str) -> str:
     if _refresh_backoff_active():
         return ""
     try:
-        body = json.dumps(
-            {
+        payload = {
                 "grant_type": "refresh_token",
                 "refresh_token": refresh,
                 "client_id": CLAUDE_CLIENT_ID,
             }
-        ).encode()
+        if isinstance(scopes, list) and scopes and all(isinstance(s, str) for s in scopes):
+            payload['scope'] = ' '.join(scopes)
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(
             CLAUDE_TOKEN_URL, data=body,
-            headers={"Content-Type": "application/json", "User-Agent": BROWSER_UA,
+            headers={"Content-Type": "application/json", "User-Agent": f"usage-monitor/{__version__}",
                      "Accept": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=10) as res:
             data = json.loads(res.read().decode("utf-8", "ignore"))
-        tok = str(data.get("access_token") or "")
+        tok = data.get("access_token")
+        if not isinstance(tok, str) or not tok.strip():
+            tok = ''
+        if data.get('refresh_token') is not None and not isinstance(data['refresh_token'], str):
+            tok = ''
         if tok:
+            if credential_path is not None:
+                tok = _save_refreshed_oauth(credential_path, refresh, data)
+                if not tok:
+                    _record_refresh_failure(False)
+                    return ''
             _clear_refresh_backoff()
             return tok
         _record_refresh_failure(False)

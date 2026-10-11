@@ -54,6 +54,7 @@ def apply(codex: dict, claude: dict, path: Path, now=None):
             old = _windows(previous.get('windows') or {}, keys, field)
             observed = previous.get('observed_at')
             if all(k in old for k in keys[:2]) and isinstance(observed, (int, float)) and math.isfinite(observed):
+                failure = data.get(source) or {}
                 data['quota_cached'] = True
                 data['observed_at'] = observed
                 data[source] = old
@@ -61,7 +62,8 @@ def apply(codex: dict, claude: dict, path: Path, now=None):
                     data['has_rate'] = True
                 else:
                     data['quota_source'] = previous.get('quota_source', 'legacy_cache')
-                    data['fetch_status'] = (claude.get('oauth') or {}).get('status')
+                    data['fetch_status'] = failure.get('status')
+                    data['fetch_detail'] = failure.get('detail')
                     data[source]['status'] = 'ok'
     if dirty:
         try:

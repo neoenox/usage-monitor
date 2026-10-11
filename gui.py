@@ -35,7 +35,11 @@ def setup_guidance(codex, claude):
         cx = 'Codex: 公式Codexをインストールし、codex loginでログインしてください。'
     else:
         cx = 'Codex: 最新取得は未確認。公式Codexを起動し、必要ならcodex loginで再ログイン。\n' + str(codex.get('usage_detail') or '「更新」で再確認してください。')
-    if claude.get('quota_source') == 'statusline' and (claude.get('oauth') or {}).get('status') == 'ok':
+    if claude.get('fetch_detail') == 'rate_limited_retry_later' or (claude.get('oauth') or {}).get('detail') == 'rate_limited_retry_later':
+        cl = 'Claude: 認証更新が429で制限されています。再ログインせず、待機後に自動再試行します。'
+    elif claude.get('fetch_detail') == 'refresh_retry_later' or (claude.get('oauth') or {}).get('detail') == 'refresh_retry_later':
+        cl = 'Claude: 認証更新に失敗しました。待機後に自動再試行します。'
+    elif claude.get('quota_source') == 'statusline' and (claude.get('oauth') or {}).get('status') == 'ok':
         cl = 'Claude: statusline観測済み（認証状態の直接確認ではありません）。'
     elif (claude.get('oauth') or {}).get('status') == 'ok':
         cl = 'Claude: 使用枠を直接取得成功。'
@@ -616,6 +620,10 @@ class App(tk.Tk):
                            else "更新しました（Codexはローカル履歴）")
         if codex.get("quota_cached") or (claude.get("quota_cached") and claude.get("quota_source") != "statusline"):
             self.status.config(text="更新失敗：前回取得値を表示しています")
+            if claude.get('fetch_detail') == 'rate_limited_retry_later':
+                self.status.config(text="Claude認証更新が429で制限中：待機後に自動再試行します")
+            elif claude.get('fetch_detail') == 'refresh_retry_later':
+                self.status.config(text="Claude認証更新に失敗：待機後に自動再試行します")
             self.freshness.config(text="表示は前回成功時の値です（各枠の取得日時を参照）")
         if getattr(self, "tray", None):
             self.tray.update_from(codex, claude)
