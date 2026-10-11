@@ -1,3 +1,5 @@
+> 2026-10-11: この直接取得方式は廃止しました。現在は公式Claude Codeのstatusline観測値を受け取ります。以下は当時の作業記録です。
+
 # Local Claude acquisition rollback (2026-10-09)
 
 At the user's request, restore the Claude direct acquisition implementation from 96a6895, while retaining subsequent Codex, cache validation, forecast, SQLite and native Unicode shortcut fixes.

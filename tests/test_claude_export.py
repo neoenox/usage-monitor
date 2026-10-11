@@ -28,7 +28,7 @@ def test_scan_uses_export_without_auth_access(tmp_path, monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError('credential or network access')
     monkeypatch.setattr(m, 'fetch_claude_oauth', forbidden)
-    out = {'oauth': c.read(target), 'observed_at': 1900000000, 'quota_cached': True, 'quota_source': 'statusline'}
+    out = m.scan_claude(tmp_path)
     assert out['oauth']['five_hour']['utilization'] == 25
     assert out['observed_at'] == 1900000000
     assert out['quota_cached'] is True
@@ -72,3 +72,36 @@ def test_missing_window_removes_previous_data(tmp_path):
     c.export({'rate_limits': {'five_hour': {'used_percentage': 25, 'resets_at': 2000000000}}}, target)
     c.export({}, target)
     assert c.read(target)['status'] == 'missing_token'
+
+
+def test_missing_statusline_does_not_show_old_direct_cache(tmp_path):
+    import monitor as m
+    import usage_cache
+    cache = tmp_path / 'cache.json'
+    usage_cache.apply({}, {'oauth': {'status': 'ok', 'five_hour': {'utilization': 94},
+                                    'seven_day': {'utilization': 86}}}, cache)
+    _, result = usage_cache.apply({}, m.scan_claude(tmp_path), cache)
+    assert result['oauth']['status'] == 'missing_token'
+    assert not result['quota_cached']
+
+
+def test_statusline_preserves_pacing_and_records_observation_once(app, tmp_path, monkeypatch):
+    import gui
+    import monitor as m
+    import history as h
+    now = 2000000
+    monkeypatch.setattr('time.time', lambda: now)
+    monkeypatch.setattr(app, '_schedule_tick', lambda: None)
+    h.record({'claude_5h': 10}, ts=now - 3600)
+    c.export({'rate_limits': {'five_hour': {'used_percentage': 30, 'resets_at': now + 3600}}},
+             c.path(tmp_path), now=now)
+    codex, claude = m.scan_codex(tmp_path), m.scan_claude(tmp_path)
+    app._render(codex, claude)
+    app._render(codex, claude)
+    assert sum(t == now for t, u in h.recent('claude_5h')) == 1
+    text = app.cl_lbl5.cget('text')
+    assert '平均使用率：20.0% / 時間' in text
+    assert '\n観測時の利用目安：70.0% / 時間まで' in text
+    assert '観測値' in text
+    app._tick()
+    assert app.cl_lbl5.cget('text') == text

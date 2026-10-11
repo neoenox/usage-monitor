@@ -19,13 +19,7 @@ from pathlib import Path
 
 __version__ = "0.5.2"
 
-CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
-CLAUDE_USAGE_BETA = "oauth-2025-04-20"
-CLAUDE_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
-CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Claude Code public OAuth client
-CLAUDE_CRED_TARGET = "Claude Code-credentials"  # OS credential store service name
-BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-              "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+
 
 
 def fmt_num(n: int) -> str:
@@ -509,7 +503,8 @@ def scan_claude(home: Path) -> dict:
                     cache_r += int(u.get("cache_read_input_tokens") or 0)
         except Exception:
             continue
-    oauth = fetch_claude_oauth(home, isolated=not _same_home(home))
+    import claude_export
+    oauth = claude_export.read(claude_export.path(None if _same_home(home) else home))
     return {
         "files": len(files),
         "messages": msgs,
@@ -519,373 +514,43 @@ def scan_claude(home: Path) -> dict:
         "cache_read": cache_r,
         "total": inp + out,
         "oauth": oauth,
+        "quota_source": "statusline",
+        "quota_cached": oauth.get("status") == "ok",
+        "observed_at": oauth.get("observed_at"),
     }
 
 
+# Retired compatibility interfaces: never read subscription credentials or poll OAuth.
 def claude_token(home: Path, *, isolated: bool = False) -> str:
-    """Resolve Claude OAuth access token (memory only, never persisted).
-
-    Order: env CLAUDE_CODE_OAUTH_TOKEN / ~/.claude_oauth_token file /
-    ~/.claude/.credentials.json (written by `claude auth login`) /
-    OS credential store entry (with refresh when expired).
-    モデル呼び出しでの認証復旧は行わない。復旧できなければ公式ツールで再ログイン。
-    """
-    if not isolated:
-        tok = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
-        if tok:
-            return tok
-    try:
-        p = home / ".claude_oauth_token"
-        if p.exists():
-            tok = p.read_text(encoding="utf-8", errors="ignore").strip()
-            if tok:
-                return tok
-    except Exception:
-        pass
-    for _ in range(2):  # 初回 + CLI再取得後の再読込
-        try:
-            p = home / ".claude" / ".credentials.json"
-            if p.exists():
-                creds = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
-                tok = _resolve_oauth_access(creds.get("claudeAiOauth") or {}, credential_path=p)
-                if tok:
-                    return tok
-                if _cli_refresh_creds(home):
-                    continue
-                break  # try the OS store even when credentials.json is expired
-        except Exception:
-            pass
-        break
-    return "" if isolated else claude_token_from_os_store()
+    return ""
 
 
 def claude_has_creds(home: Path, *, isolated: bool = False) -> bool:
-    try:
-        if (home / ".claude" / ".credentials.json").exists():
-            return True
-    except Exception:
-        pass
-    try:
-        if (home / ".claude_oauth_token").read_text(encoding="utf-8").strip():
-            return True
-    except (OSError, UnicodeError):
-        pass
-    if isolated:
-        return False
-    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip():
-        return True
-    try:
-        return bool(_read_credential_store(CLAUDE_CRED_TARGET))
-    except (OSError, AttributeError):
-        return False
+    return False
 
 
-def _resolve_oauth_access(oauth: dict, *, credential_path: Path | None = None) -> str:
-    """Return a live accessToken from a claudeAiOauth dict, refreshing if expired."""
-    import time
-
-    access = str(oauth.get("accessToken") or "")
-    try:
-        expired = float(oauth.get("expiresAt") or 0) / 1000 < time.time() + 60
-    except (TypeError, ValueError):
-        expired = True
-    if access and not expired:
-        return access
-    refresh = str(oauth.get("refreshToken") or "")
-    if not refresh:
-        return access  # try anyway; API will tell
-    if credential_path is not None:
-        return _refresh_oauth(refresh, credential_path=credential_path)
-    return _refresh_oauth(refresh)
+def _resolve_oauth_access(oauth: dict) -> str:
+    return ""
 
 
-CLAUDE_REFRESH_COOLDOWN_S = 3600  # rate-limit(429)後の再試行抑制
-CLAUDE_REFRESH_RETRY_S = 600  # その他失敗後の再試行抑制
-
-
-def _refresh_backoff_path() -> Path:
-    d = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "usage-monitor"
-    return d / ".claude-refresh-backoff.json"
-
-
-def _refresh_backoff_state(now: float | None = None) -> tuple[bool, bool]:
-    """(抑制中か, rate-limit起因か)を返す。ファイル異常時は (False, False)。"""
-    import time as _time
-
-    now = _time.time() if now is None else now
-    try:
-        raw = json.loads(_refresh_backoff_path().read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            return False, False
-        if raw.get('endpoint', 'https://console.anthropic.com/v1/oauth/token') != CLAUDE_TOKEN_URL:
-            return False, False
-        failed_at = float(raw.get("failed_at") or 0)
-        cooldown = float(raw.get("cooldown") or 0)
-        if not (failed_at > 0 and cooldown > 0):
-            return False, False
-        if failed_at + cooldown <= now:
-            return False, False
-        return True, bool(raw.get("rate_limited"))
-    except (OSError, ValueError, TypeError):
-        return False, False
-
-
-def _refresh_backoff_active(now: float | None = None) -> bool:
-    """直近のrefresh失敗が抑制期間内ならTrue。ファイル異常時は抑制しない。"""
-    active, _ = _refresh_backoff_state(now)
-    return active
-
-
-def _record_refresh_failure(rate_limited: bool) -> None:
-    """refresh失敗を記録し、次回までネットワーク再試行を抑止する。"""
-    import time as _time
-
-    cooldown = CLAUDE_REFRESH_COOLDOWN_S if rate_limited else CLAUDE_REFRESH_RETRY_S
-    try:
-        p = _refresh_backoff_path()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"failed_at": _time.time(), "cooldown": cooldown,
-                                 "rate_limited": bool(rate_limited), 'endpoint': CLAUDE_TOKEN_URL}),
-                     encoding="utf-8")
-    except OSError:
-        pass
-
-
-def _clear_refresh_backoff() -> None:
-    try:
-        _refresh_backoff_path().unlink(missing_ok=True)
-    except OSError:
-        pass
-
-
-def _refresh_oauth(refresh: str, *, credential_path: Path | None = None) -> str:
-    """Serialize file-token refresh across monitor processes and re-read credentials."""
-    import time
-
-    if credential_path is None:
-        return _perform_refresh_oauth(refresh)
-    # OS locks are released even if the process crashes. No token goes in the lock.
-    with credential_path.with_suffix('.monitor-lock').open('a+b') as lock:
-        if lock.tell() == 0:
-            lock.write(b'0')
-            lock.flush()
-        lock.seek(0)
-        try:
-            if os.name == 'nt':
-                import msvcrt
-                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            return ''  # Another monitor is refreshing; try its saved token next time.
-        try:
-            latest = json.loads(credential_path.read_text(encoding='utf-8'))['claudeAiOauth']
-            if latest.get('accessToken') and float(latest.get('expiresAt') or 0) > (time.time() + 60) * 1000:
-                return str(latest['accessToken'])
-            refresh = str(latest.get('refreshToken') or '')
-            if not refresh:
-                return ''
-            return _perform_refresh_oauth(refresh, credential_path=credential_path,
-                                          scopes=latest.get('scopes'))
-        finally:
-            if os.name == 'nt':
-                lock.seek(0)
-                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-
-
-def _save_refreshed_oauth(path: Path, refresh: str, data: dict) -> str:
-    """Preserve unrelated credentials and do not replace a newer official login."""
-    import math
-    import tempfile
-    import time
-
-    current = json.loads(path.read_text(encoding='utf-8'))
-    oauth = current.get('claudeAiOauth') or {}
-    if oauth.get('refreshToken') != refresh:
-        if float(oauth.get('expiresAt') or 0) > (time.time() + 60) * 1000:
-            return str(oauth.get('accessToken') or '')
-        return ''
-    expires = data.get('expires_in')
-    if isinstance(expires, bool) or not isinstance(expires, (int, float)) or not math.isfinite(expires) or expires <= 60:
-        return ''
-    updated = dict(oauth, accessToken=data['access_token'],
-                   refreshToken=data.get('refresh_token') or refresh,
-                   expiresAt=int((time.time() + expires) * 1000))
-    if isinstance(data.get('scope'), str):
-        updated['scopes'] = data['scope'].split()
-    current['claudeAiOauth'] = updated
-    # mkstemp uses owner-only permissions on POSIX; on Windows the existing
-    # credential directory supplies its inherited user ACL. Always remove temp data.
-    fd, temporary = tempfile.mkstemp(prefix='.credentials-monitor-', dir=path.parent)
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-            json.dump(current, stream)
-            stream.flush()
-            os.fsync(stream.fileno())
-        # Recheck immediately before replacement if official Claude changed login.
-        latest = json.loads(path.read_text(encoding='utf-8'))
-        if latest != dict(current, claudeAiOauth=oauth):
-            latest_oauth = latest.get('claudeAiOauth') or {}
-            return str(latest_oauth.get('accessToken') or '') if float(latest_oauth.get('expiresAt') or 0) > (time.time() + 60) * 1000 else ''
-        os.replace(temporary, path)
-        return str(data['access_token'])
-    finally:
-        Path(temporary).unlink(missing_ok=True)
-
-
-def _perform_refresh_oauth(refresh: str, *, credential_path: Path | None = None, scopes=None) -> str:
-    """リフレッシュ1回のみ (リトライループ禁止: エンドポイントが厳格)。
-
-    直近に失敗しているときはネットワークに出ずに空文字を返す。
-    429を繰り返し叩いてrate-limitを悪化させないための抑止。
-    """
-    if _refresh_backoff_active():
-        return ""
-    try:
-        payload = {
-                "grant_type": "refresh_token",
-                "refresh_token": refresh,
-                "client_id": CLAUDE_CLIENT_ID,
-            }
-        if isinstance(scopes, list) and scopes and all(isinstance(s, str) for s in scopes):
-            payload['scope'] = ' '.join(scopes)
-        body = json.dumps(payload).encode()
-        req = urllib.request.Request(
-            CLAUDE_TOKEN_URL, data=body,
-            headers={"Content-Type": "application/json", "User-Agent": f"usage-monitor/{__version__}",
-                     "Accept": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=10) as res:
-            data = json.loads(res.read().decode("utf-8", "ignore"))
-        tok = data.get("access_token")
-        if not isinstance(tok, str) or not tok.strip():
-            tok = ''
-        if data.get('refresh_token') is not None and not isinstance(data['refresh_token'], str):
-            tok = ''
-        if tok:
-            if credential_path is not None:
-                tok = _save_refreshed_oauth(credential_path, refresh, data)
-                if not tok:
-                    _record_refresh_failure(False)
-                    return ''
-            _clear_refresh_backoff()
-            return tok
-        _record_refresh_failure(False)
-        return ""
-    except Exception as e:
-        rate_limited = getattr(e, "code", None) == 429
-        if "429" in type(e).__name__ or "429" in str(e):
-            rate_limited = True
-        _record_refresh_failure(rate_limited)
-        return ""
+def _refresh_oauth(refresh: str) -> str:
+    return ""
 
 
 def _cli_refresh_creds(home: Path) -> bool:
-    """Compatibility no-op: quota monitoring must never invoke a model.
-
-    Recover through official-tool re-login instead of consuming usage to refresh.
-    """
     return False
 
 
 def claude_token_from_os_store() -> str:
-    """Read OAuth creds Claude Code stored in the OS credential store.
-
-    Windows: Credential Manager target "Claude Code-credentials" (keytar).
-    Returns a live accessToken, refreshing it when expired. "" when absent.
-    """
-    if os.name != "nt":
-        return ""
-    raw = _read_credential_store(CLAUDE_CRED_TARGET)
-    if not raw:
-        return ""
-    try:
-        oauth = json.loads(raw).get("claudeAiOauth") or {}
-    except Exception:
-        return ""
-    return _resolve_oauth_access(oauth)
+    return ""
 
 
 def _read_credential_store(target: str) -> str:
-    """Windows Credential Manager generic-credential password via ctypes."""
-    if os.name != "nt":
-        return ""
-    import ctypes
-    from ctypes import wintypes
-
-    class CREDENTIAL(ctypes.Structure):
-        _fields_ = [
-            ("Flags", wintypes.DWORD),
-            ("Type", wintypes.DWORD),
-            ("TargetName", wintypes.LPWSTR),
-            ("Comment", wintypes.LPWSTR),
-            ("LastWritten", wintypes.FILETIME),
-            ("CredentialBlobSize", wintypes.DWORD),
-            ("CredentialBlob", wintypes.LPBYTE),
-            ("Persist", wintypes.DWORD),
-            ("AttributeCount", wintypes.DWORD),
-            ("Attributes", wintypes.LPVOID),
-            ("TargetAlias", wintypes.LPWSTR),
-            ("UserName", wintypes.LPWSTR),
-        ]
-
-    advapi32 = ctypes.windll.advapi32
-    pcred = ctypes.POINTER(CREDENTIAL)()
-    if not advapi32.CredReadW(target, 1, 0, ctypes.byref(pcred)):
-        return ""
-    try:
-        size = int(pcred.contents.CredentialBlobSize)
-        buf = ctypes.string_at(pcred.contents.CredentialBlob, size)
-        return buf.decode("utf-16-le", errors="ignore").rstrip("\x00")
-    except Exception:
-        return ""
-    finally:
-        advapi32.CredFree(pcred)
+    return ""
 
 
 def fetch_claude_oauth(home: Path, *, isolated: bool = False) -> dict:
-    """GET /api/oauth/usage (same endpoint Claude Code /usage uses).
-
-    Returns {"status": "ok", "five_hour": {...}, "seven_day": {...}}
-    or {"status": "missing_token" | "error", "detail": ...}.
-    Token: `claude auth login` (auto-read) or env CLAUDE_CODE_OAUTH_TOKEN
-    or write it to ~/.claude_oauth_token.
-    """
-    tok = claude_token(home, isolated=isolated)
-    if not tok:
-        if claude_has_creds(home, isolated=isolated):
-            active, limited = _refresh_backoff_state()
-            if active:
-                detail = "rate_limited_retry_later" if limited else "refresh_retry_later"
-                return {"status": "expired", "detail": detail}
-            return {"status": "expired"}
-        return {"status": "missing_token"}
-    try:
-        req = urllib.request.Request(
-            CLAUDE_USAGE_URL,
-            headers={
-                "Authorization": f"Bearer {tok}",
-                "anthropic-beta": CLAUDE_USAGE_BETA,
-                "Content-Type": "application/json",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=10) as res:
-            data = json.loads(res.read().decode("utf-8", "ignore"))
-        if not isinstance(data, dict):
-            return {"status": "error", "detail": "unexpected response"}
-        _clear_refresh_backoff()  # live取得成功時は古い抑制マーカーを残さない
-        return {
-            "status": "ok",
-            "five_hour": data.get("five_hour") or {},
-            "seven_day": data.get("seven_day") or {},
-            "seven_day_opus": data.get("seven_day_opus") or {},
-            "seven_day_sonnet": data.get("seven_day_sonnet") or {},
-        }
-    except Exception as e:
-        return {"status": "error", "detail": f"{type(e).__name__}: {e}"}
+    return {"status": "unsupported", "detail": "Use documented Claude statusline numeric export"}
 
 
 def main() -> int:

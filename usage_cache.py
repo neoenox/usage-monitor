@@ -41,7 +41,7 @@ def apply(codex: dict, claude: dict, path: Path, now=None):
         ('claude', claude, 'oauth', ('five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'), 'utilization', (claude.get('oauth') or {}).get('status') == 'ok'),
     ):
         windows = _windows(data.get(source) or {}, keys, field)
-        if data.get('quota_source') == 'statusline' and fresh:
+        if data.get('quota_source') == 'statusline':
             # Export observations are not a newly polled sample. Keep their time.
             continue
         if fresh and all(k in windows for k in keys[:2]):

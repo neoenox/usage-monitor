@@ -35,19 +35,10 @@ def setup_guidance(codex, claude):
         cx = 'Codex: 公式Codexをインストールし、codex loginでログインしてください。'
     else:
         cx = 'Codex: 最新取得は未確認。公式Codexを起動し、必要ならcodex loginで再ログイン。\n' + str(codex.get('usage_detail') or '「更新」で再確認してください。')
-    if claude.get('fetch_detail') == 'rate_limited_retry_later' or (claude.get('oauth') or {}).get('detail') == 'rate_limited_retry_later':
-        cl = 'Claude: 認証更新が429で制限されています。再ログインせず、待機後に自動再試行します。'
-    elif claude.get('fetch_detail') == 'refresh_retry_later' or (claude.get('oauth') or {}).get('detail') == 'refresh_retry_later':
-        cl = 'Claude: 認証更新に失敗しました。待機後に自動再試行します。'
-    elif claude.get('quota_source') == 'statusline' and (claude.get('oauth') or {}).get('status') == 'ok':
-        cl = 'Claude: statusline観測済み（認証状態の直接確認ではありません）。'
-    elif (claude.get('oauth') or {}).get('status') == 'ok':
-        cl = 'Claude: 使用枠を直接取得成功。'
-    elif (claude.get('oauth') or {}).get('status') == 'expired':
-        cl = ('Claude: 認証期限切れ。見えるターミナルで claude auth login --claudeai を実行し、'
-              'ブラウザ認証後に「更新」で再確認。更新連打はrate-limitを悪化させるためお控えください。')
+    if (claude.get('oauth') or {}).get('status') == 'ok':
+        cl = 'Claude: statusline観測済み（認証状態の直接確認ではありません）。Claude Code利用時に更新されます。'
     else:
-        cl = 'Claude: 未取得。公式Claude Codeでclaude auth login後、「更新」で再確認。'
+        cl = 'Claude: 使用率データ待ち。statusline連携を設定し、Claude Codeを再起動して通常利用してください。'
     return cx, cl
 
 
@@ -93,13 +84,13 @@ def quota_forecast(used, window_min, reset_epoch, hist=(), show_date=True) -> st
     return m.quota_forecast(used, window_min, reset_epoch, hist, show_date)
 
 
-def average_usage_text(used, window_min, reset_epoch, hist=(), *, allowance=None) -> str:
+def average_usage_text(used, window_min, reset_epoch, hist=(), *, allowance=None, now=None) -> str:
     """Average observed quota consumption within the latest continuous window."""
     import math
     import time
 
     prefix = "平均使用率："
-    now = time.time()
+    now = time.time() if now is None else now
     try:
         if any(isinstance(v, bool) for v in (used, window_min, reset_epoch)):
             return prefix + "データ不足"
@@ -138,7 +129,7 @@ def average_usage_text(used, window_min, reset_epoch, hist=(), *, allowance=None
         return prefix + "データ不足"
 
 
-def usage_pacing_text(used, window_min, reset_epoch, hist=()) -> str:
+def usage_pacing_text(used, window_min, reset_epoch, hist=(), *, now=None) -> str:
     """Compare observed consumption with the remaining budget until reset."""
     import math
     import time
@@ -149,23 +140,39 @@ def usage_pacing_text(used, window_min, reset_epoch, hist=()) -> str:
         used, window_min, reset_epoch = map(float, (used, window_min, reset_epoch))
         if not all(math.isfinite(v) for v in (used, window_min, reset_epoch)) or not 0 <= used <= 100 or window_min <= 0:
             raise ValueError
-        remaining = reset_epoch - time.time()
+        now = time.time() if now is None else now
+        remaining = reset_epoch - now
         if remaining <= 0:
             raise ValueError
         unit_seconds, unit = (3600, "時間") if window_min <= 300 else (86400, "日")
         # Round the allowance down so the displayed target never overstates it.
         allowance = math.floor((100 - used) * unit_seconds / remaining * 10) / 10
-        average = average_usage_text(used, window_min, reset_epoch, hist, allowance=allowance)
+        average = average_usage_text(used, window_min, reset_epoch, hist, allowance=allowance, now=now)
         if "利用目安：" in average:
             return average
         status = "（上限到達）" if used >= 100 else ""
         return f"{average}\n利用目安：{allowance:.1f}% / {unit}まで{status}"
     except (TypeError, ValueError, OverflowError):
-        return average_usage_text(used, window_min, reset_epoch, hist)
+        return average_usage_text(used, window_min, reset_epoch, hist, now=now)
 
 
 def usage_detail(used, window_min, reset_epoch, metric, forecast):
     return forecast + "\n" + usage_pacing_text(used, window_min, reset_epoch, h.recent(metric))
+
+
+def claude_observation_label(data, key):
+    import usage_cache
+    w = data.get('oauth', {}).get(key) or {}
+    if 'utilization' not in w:
+        return 'Claude Codeの使用率データ待ち'
+    used, reset, observed = w['utilization'], w.get('resets_at'), data['observed_at']
+    if m.is_stale(reset):
+        return usage_cache.label(used, reset, observed, 'statusline')
+    window, metric, tag = (300, 'claude_5h', '5h') if key == 'five_hour' else (10080, 'claude_wk', '週')
+    pace = usage_pacing_text(used, window, m.iso_to_epoch(reset), h.recent(metric), now=observed)
+    return (f'{tag} 残り{100-used:.0f}% (使用{used:.0f}%) '
+            f'reset={m.fmt_ts_iso(reset)}\n取得日時：{m.fmt_ts(observed)}（Claude Code利用時の観測値）\n'
+            + pace.replace('利用目安：', '観測時の利用目安：'))
 
 
 
@@ -418,7 +425,9 @@ class App(tk.Tk):
         self.setup_claude = ttk.Label(config, text="Claude: 確認中…", wraplength=470, justify="left")
         self.setup_claude.pack(anchor="w", pady=6)
         ttk.Label(config, text="同一アカウントのサブスク利用枠が対象。API課金・他アカウント合算は対象外。", wraplength=470, style="Hint.TLabel").pack(anchor="w")
-        ttk.Label(config, text="Claudeは変更前の直接取得方式に復元しました。\n公式Claude Codeの保存済み認証を利用します。statusline設定は不要です。", style="Hint.TLabel", justify="left").pack(anchor="w", pady=8)
+        ttk.Label(config, text="Claude Code利用時の使用率を受け取ります。\nモニターは認証情報にアクセスせず、独自の認証更新も行いません。", style="Hint.TLabel", justify="left").pack(anchor="w", pady=8)
+        ttk.Button(config, text="statusline連携を設定", command=self.setup_claude_export).pack(anchor="w", pady=4)
+        ttk.Button(config, text="以前のstatuslineを復元", command=self.restore_claude_export).pack(anchor="w", pady=4)
 
     def setup_claude_export(self):
         from tkinter import messagebox
@@ -577,13 +586,7 @@ class App(tk.Tk):
         elif oauth.get("status") in ("missing_token", "expired"):
             self.cl_bar5["value"] = 0
             self.cl_barW["value"] = 0
-            if oauth.get("status") == "expired":
-                if str(oauth.get("detail") or "").endswith("retry_later"):
-                    self.cl_lbl5.config(text="認証期限切れ: refreshがrate-limit中のため再試行を抑制しています。見えるターミナルで claude auth login --claudeai 後に「更新」（連打厳禁）")
-                else:
-                    self.cl_lbl5.config(text="認証期限切れ: 見えるターミナルで claude auth login --claudeai 後に「更新」（更新連打は厳禁）")
-            else:
-                self.cl_lbl5.config(text="未取得: 公式Claude Codeでclaude auth login後、更新してください")
+            self.cl_lbl5.config(text="Claude Codeの使用率データ待ち：連携設定後にClaude Codeを再起動して通常利用してください")
             self.cl_lblW.config(text="")
             self.cl_models.config(text="")
         else:
@@ -598,9 +601,22 @@ class App(tk.Tk):
             for lbl, key in ((self.cl_lbl5, "five_hour"), (self.cl_lblW, "seven_day")):
                 w = oauth.get(key) or {}
                 if "utilization" in w:
-                    lbl.config(text=usage_cache.label(w["utilization"], w.get("resets_at"), claude["observed_at"], claude.get("quota_source")))
+                    lbl.config(text=claude_observation_label(claude, key) if claude.get("quota_source") == "statusline" else usage_cache.label(w["utilization"], w.get("resets_at"), claude["observed_at"], claude.get("quota_source")))
             self.cl_models.config(text="Claude Code利用時の観測値（statusline）" if claude.get("quota_source") == "statusline" else "前回取得値（オフライン参考値）")
             cl5 = clw = None
+
+        if claude.get('quota_source') == 'statusline' and oauth.get('status') == 'ok':
+            observed = claude.get('observed_at')
+            if observed and observed != getattr(self, '_claude_recorded_at', None):
+                metrics = {}
+                for key, metric in (('five_hour', 'claude_5h'), ('seven_day', 'claude_wk')):
+                    w = oauth.get(key) or {}
+                    if 'utilization' in w and not m.is_stale(w.get('resets_at')):
+                        if not any(t == int(observed) for t, _ in h.recent(metric)):
+                            metrics[metric] = w['utilization']
+                if metrics:
+                    h.record(metrics, ts=int(observed))
+                self._claude_recorded_at = observed
 
         # 履歴記録＋グラフ
         try:
@@ -620,10 +636,6 @@ class App(tk.Tk):
                            else "更新しました（Codexはローカル履歴）")
         if codex.get("quota_cached") or (claude.get("quota_cached") and claude.get("quota_source") != "statusline"):
             self.status.config(text="更新失敗：前回取得値を表示しています")
-            if claude.get('fetch_detail') == 'rate_limited_retry_later':
-                self.status.config(text="Claude認証更新が429で制限中：待機後に自動再試行します")
-            elif claude.get('fetch_detail') == 'refresh_retry_later':
-                self.status.config(text="Claude認証更新に失敗：待機後に自動再試行します")
             self.freshness.config(text="表示は前回成功時の値です（各枠の取得日時を参照）")
         if getattr(self, "tray", None):
             self.tray.update_from(codex, claude)
@@ -684,7 +696,7 @@ class App(tk.Tk):
                     for lbl, key in rows:
                         w = data[source].get(key) or {}
                         if field in w:
-                            lbl.config(text=usage_cache.label(w[field], w.get("resets_at"), data["observed_at"], data.get("quota_source")))
+                            lbl.config(text=claude_observation_label(data, key) if data.get("quota_source") == "statusline" else usage_cache.label(w[field], w.get("resets_at"), data["observed_at"], data.get("quota_source")))
             self.freshness.config(text="各枠の取得日時を参照（Claudeは利用時の観測値）" if claude.get("quota_source") == "statusline" and not codex.get("quota_cached") else "表示は前回成功時の値です（各枠の取得日時を参照）")
         codex, _ = m.normalize_snapshot(codex, {})
         self._last = (codex, claude)

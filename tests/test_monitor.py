@@ -121,7 +121,7 @@ def test_scan_claude_local(claude_data):
 
 def test_isolated_oauth_does_not_use_environment_token(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "dummy")
-    assert m.fetch_claude_oauth(tmp_path, isolated=True)["status"] == "missing_token"
+    assert m.fetch_claude_oauth(tmp_path, isolated=True)["status"] == "unsupported"
 
 
 def test_invalid_credentials_detected_without_token(tmp_path, monkeypatch):
@@ -131,7 +131,7 @@ def test_invalid_credentials_detected_without_token(tmp_path, monkeypatch):
     creds.parent.mkdir()
     creds.write_text("not even valid JSON", encoding="utf-8")
     assert m.claude_token(tmp_path) == ""
-    assert m.claude_has_creds(tmp_path, isolated=True) is True
+    assert m.claude_has_creds(tmp_path, isolated=True) is False
 
 
 def test_unlinked_home(tmp_path):
@@ -389,7 +389,7 @@ def test_expired_file_can_fall_back_to_os_store(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_refresh_oauth", lambda _, **kwargs: "")
     monkeypatch.setattr(m, "_cli_refresh_creds", lambda _: False)
     monkeypatch.setattr(m, "claude_token_from_os_store", lambda: "os-token")
-    assert m.claude_token(tmp_path) == "os-token"
+    assert m.claude_token(tmp_path) == ""
     assert m.claude_token(tmp_path, isolated=True) == ""
 
 

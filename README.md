@@ -21,16 +21,15 @@ claude auth status  # {"loggedIn": true} を確認
 python -m pip install -r requirements.txt
 
 # 4. モニターを起動
-python monitor.py   # Codex: 公式CLI経由で使用量取得 / Claude: ログイン資格情報で使用量APIを自動取得
+python gui.py   # 設定タブでClaudeのstatusline連携を設定
 ```
 
 補足:
 
-- Claude の使用量 API は `claude auth login` の OAuth をそのまま使う (読取のみ・保存しない)。
-  ヘッドレス環境では `claude setup-token` 発行のトークンを環境変数
-  `CLAUDE_CODE_OAUTH_TOKEN` か `~/.claude_oauth_token` に置く方法もある。
-- Claude の会話履歴 (`~/.claude/projects`) は自動クリーンアップで消えるため、
-  トークン集計は参考値。サブスク残量は API 値が正。
+- Claudeの使用率は公式Claude Codeのstatuslineから受け取ります。モニターはClaudeの認証情報を読み取らず、OAuth更新や使用量APIへの通信を行いません。
+- 最初に設定タブでstatusline連携を設定し、Claude Codeを再起動して通常利用してください。使用率はセッションの最初のAPI応答後に届きます。
+- 更新はClaude Code利用時のみです。モニター単独でのリアルタイム取得ではありません。観測日時を明示し、期限を過ぎた値はリセット前の参考値として表示します。
+- 会話履歴のトークン集計は参考値です。使用枠の割合と区別してください。
 
 ## 使い方
 
@@ -83,7 +82,7 @@ pip install pyinstaller
 観測された平均が目安以内なら「目安内」、超えていれば「目安超過」と表示します。
 目安は小数第1位まで切り捨て、毎分更新します。これは現在の残量・リセット時刻に基づく配分目安です。
 平均は同じ利用枠の連続した履歴が10分以上必要ですが、利用目安は履歴不足でも表示できます。
-前回取得値を表示している場合やリセット後の取得待ちでは、新しい利用目安を表示しません。
+通信失敗時の前回取得値やリセット後の取得待ちから、新しい利用目安は計算しません。Claudeのstatusline観測値では、観測日時を基準にした平均と「観測時の利用目安」を表示します。同じ観測値を何度読み込んでも新しい履歴にしません。
 
 ## フォルダー構成
 
