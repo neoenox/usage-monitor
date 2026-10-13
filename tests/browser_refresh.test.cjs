@@ -18,9 +18,13 @@ globalThis.chrome = {
   storage: {local: {get: async () => ({}), set: async () => {}, remove: async () => {}}},
   tabs: {get: async () => null, reload: async () => {}, create: async () => ({id: 1})},
   alarms: {
-    _existing: null, _created: 0,
+    _existing: null, _created: 0, _lastOptions: null,
     get: async function () { return this._existing; },
-    create: async function () { this._created++; },
+    create: async function (name, options) {
+      this._created++;
+      this._lastOptions = options;
+      this._existing = {name};
+    },
     onAlarm: {addListener: (fn) => { listeners.alarm = fn; }},
   },
 };
@@ -62,9 +66,21 @@ test('parse_state listener is registered alongside quota', () => {
 test('missing alarm is recreated, existing alarm is untouched', async () => {
   globalThis.chrome.alarms._existing = null;
   globalThis.chrome.alarms._created = 0;
+  globalThis.chrome.alarms._lastOptions = null;
   await bg.ensureAlarm();
   assert.equal(globalThis.chrome.alarms._created, 1);
   globalThis.chrome.alarms._existing = {name: 'usage-refresh'};
   await bg.ensureAlarm();
   assert.equal(globalThis.chrome.alarms._created, 1);
+});
+
+test('alarm requests cross-session persistence without duplicating', async () => {
+  globalThis.chrome.alarms._existing = null;
+  globalThis.chrome.alarms._created = 0;
+  globalThis.chrome.alarms._lastOptions = null;
+  await bg.ensureAlarm();
+  await bg.ensureAlarm();
+  assert.equal(globalThis.chrome.alarms._created, 1);
+  assert.equal(globalThis.chrome.alarms._lastOptions.persistAcrossSessions, true);
+  assert.equal(globalThis.chrome.alarms._lastOptions.periodInMinutes, 5);
 });

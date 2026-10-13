@@ -86,9 +86,11 @@ chrome.action.onClicked.addListener(async () => {
 });
 async function ensureAlarm() {
   // Alarms may not survive sessions alone; re-check on every worker start.
+  // persistAcrossSessions is explicit for Chrome 150+ (default true in 155);
+  // older versions ignore the unknown key. Idempotent: missing-only creation.
   try {
     const existing = await chrome.alarms.get('usage-refresh');
-    if (!existing) await chrome.alarms.create('usage-refresh', {periodInMinutes: 5});
+    if (!existing) await chrome.alarms.create('usage-refresh', {periodInMinutes: 5, persistAcrossSessions: true});
   } catch {}
 }
 chrome.runtime.onInstalled.addListener(async () => {
