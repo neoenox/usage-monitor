@@ -23,6 +23,14 @@ Chrome拡張の追加とローカル連携の登録はユーザーの承認後�
 
 拡張のアクセス先は `claude.ai/new*` と `claude.ai/settings/usage*`、権限はローカルプログラム通信・定期実行・拡張の設定保存です。ChromeのURL権限はパス単位に制限できないため、ホスト権限はClaudeサイトへのアクセスとして扱われる場合があります。スクリプト側では使用状況ルート以外を処理しません。
 
+## 取り込めないとき（設定タブの診断表示）
+
+- 設定タブの「ブラウザ連携」欄に manifest / registry / 拡張 / Chrome / 最終観測が1行で出ます。「最新情報に更新」でも自動更新されます。拡張は「有効」「無効」「未導入」を区別します（Cookie・認証情報は読みません。拡張の有無・無効理由のみ）。
+- 「状態を診断」で失敗理由の切り分け（manifest未登録・registry未登録・拡張未導入・拡張が無効・Chrome停止中・最終観測からの経過）が出ます。
+- 「ブラウザ連携を再登録」は承認後に `usage-monitor-browser-host.exe --register <拡張ID>` を実行します。対象は現在のWindowsユーザーのChrome設定とこの拡張IDのみです。ホスト側の再登録のみ行い、拡張自体の読み込み・有効化は `chrome://extensions` で行ってください（通常版Chrome 137以降は `--load-extension` での自動導入ができないため）。
+- パーサーは日本語・英語の両表示に対応（現在のセッション/Current session、今週/This week、リセット/Resets、12時間制のPM表記、曜日名の日英対応）。それ以外の表示変更で読めない場合は前回値を保持します。
+- よくある原因: 拡張が `chrome://extensions` から消えている（未パッケージ拡張の脱落）、Chromeを閉じている、別ページへ移動したタブを再読み込みしていない、ログアウト中、対応外の言語・画面変更。
+
 ## ビルドと解除
 
 受信プログラムは `python -m PyInstaller --onefile --console --name usage-monitor-browser-host claude_browser.py` でビルドします。標準入出力はChromeのnative messaging形式です。通信仕様は[Chrome公式ドキュメント](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging)に従います。

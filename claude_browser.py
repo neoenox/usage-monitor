@@ -10,6 +10,7 @@ import claude_export
 
 HOST = 'com.neoenox.usage_monitor'
 MAX_MESSAGE = 4096
+DEFAULT_EXTENSION_ID = 'eobplfaccjbfdlolmdjnalbedehgljjl'
 
 
 def path(home: Path | None = None) -> Path:
@@ -81,6 +82,172 @@ def main():
         msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
         msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
     serve(sys.stdin.buffer, sys.stdout.buffer, path())
+
+
+def extension_id() -> str:
+    """Pinned extension ID; the manifest key keeps it stable across reloads."""
+    try:
+        here = Path(__file__).resolve().parent / 'browser-extension' / 'extension-id.txt'
+        value = here.read_text(encoding='utf-8').strip()
+        if value:
+            return value
+    except OSError:
+        pass
+    return DEFAULT_EXTENSION_ID
+
+
+def host_exe() -> Path:
+    """Locate the browser-host executable for the current run mode."""
+    import sys
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).resolve().parent / 'usage-monitor-browser-host.exe'
+    return Path(__file__).resolve().parent / 'dist' / 'usage-monitor-browser-host.exe'
+
+
+def chrome_user_data() -> Path | None:
+    """Default Chrome profile root. Overridable in tests via monkeypatch."""
+    import os
+    base = os.environ.get('LOCALAPPDATA')
+    if not base:
+        return None
+    root = Path(base) / 'Google' / 'Chrome' / 'User Data'
+    return root if root.exists() else None
+
+
+def extension_state() -> dict:
+    """Read-only check of our extension in local Chrome profiles.
+
+    Reads only extension metadata (presence, disable reasons) from the
+    browser's own settings files. Never touches cookies or credentials.
+    Returns {'present': bool, 'disabled': bool, 'profiles': [...]} or
+    {'present': None, ...} when Chrome data is unavailable.
+    """
+    import os
+    result: dict = {'present': None, 'disabled': None, 'profiles': []}
+    try:
+        root = chrome_user_data()
+        if root is None:
+            return result
+        wanted = extension_id()
+        present, disabled, profiles = False, False, []
+        for profile in ('Default', 'Profile 2', 'Profile 3'):
+            try:
+                data = json.loads((root / profile / 'Secure Preferences').read_bytes().decode('utf-8'))
+            except (OSError, ValueError):
+                continue
+            try:
+                entry = (data.get('extensions') or {}).get('settings', {}).get(wanted)
+            except AttributeError:
+                continue
+            if isinstance(entry, dict):
+                present = True
+                profiles.append(profile)
+                reasons = entry.get('disable_reasons') or []
+                if reasons:
+                    disabled = True
+        result.update(present=present, disabled=disabled if present else False, profiles=profiles)
+        return result
+    except Exception:
+        return result
+
+
+def chrome_running() -> bool | None:
+    """Best-effort check whether Chrome is running. None when unknown."""
+    import subprocess
+    try:
+        if sys.platform == 'win32':
+            out = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq chrome.exe', '/FO', 'CSV'],
+                                 capture_output=True, text=True, timeout=10,
+                                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            return 'chrome.exe' in (out.stdout or '').lower()
+        return None
+    except Exception:
+        return None
+
+
+def diagnose(home=None) -> dict:
+    """Local-only health check for the browser quota path. Never raises."""
+    import time
+    result: dict = {'extension_id': extension_id(), 'chrome_running': chrome_running()}
+    try:
+        result['extension'] = extension_state()
+    except Exception:
+        result['extension'] = {'present': None, 'disabled': None, 'profiles': []}
+    try:
+        manifest = path().parent / 'browser-native-host.json'
+        result['manifest_exists'] = manifest.exists()
+        try:
+            data = json.loads(manifest.read_text(encoding='utf-8')) if result['manifest_exists'] else {}
+        except (OSError, ValueError):
+            data = {}
+        result['manifest_path'] = data.get('path') if isinstance(data, dict) else None
+        result['manifest_path_exists'] = bool(result['manifest_path']) and Path(str(result['manifest_path'])).exists()
+        result['manifest_origin_ok'] = (isinstance(data, dict) and
+                                        data.get('allowed_origins') == [f'chrome-extension://{result["extension_id"]}/'])
+    except Exception:
+        result.update(manifest_exists=False, manifest_path=None,
+                      manifest_path_exists=False, manifest_origin_ok=False)
+    try:
+        if sys.platform == 'win32':
+            import winreg
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                    rf'Software\Google\Chrome\NativeMessagingHosts\{HOST}') as key:
+                    value, _ = winreg.QueryValueEx(key, '')
+                    result['registry_ok'] = True
+                    result['registry_value'] = value
+            except OSError:
+                result['registry_ok'] = False
+                result['registry_value'] = None
+        else:
+            result['registry_ok'] = None
+            result['registry_value'] = None
+    except Exception:
+        result['registry_ok'] = False
+        result['registry_value'] = None
+    try:
+        target = path(home)
+        result['quota_exists'] = target.exists()
+        if result['quota_exists']:
+            data = json.loads(target.read_text(encoding='utf-8'))
+            observed = data.get('observed_at')
+            result['observed_at'] = observed if isinstance(observed, (int, float)) else None
+        else:
+            result['observed_at'] = None
+    except (OSError, ValueError):
+        result['quota_exists'] = False
+        result['observed_at'] = None
+    try:
+        observed = result.get('observed_at')
+        result['age_hours'] = (time.time() - float(observed)) / 3600 if observed else None
+    except (TypeError, ValueError):
+        result['age_hours'] = None
+    return result
+
+
+def diagnose_text(d: dict) -> str:
+    """One-glance summary for the settings tab."""
+    parts = []
+    parts.append('manifest: ' + ('OK' if d.get('manifest_exists') and d.get('manifest_origin_ok') else '未登録'))
+    reg = d.get('registry_ok')
+    parts.append('registry: ' + ('OK' if reg else '未登録' if reg is False else '-'))
+    ext = d.get('extension') or {}
+    if ext.get('present') is True:
+        parts.append('拡張: ' + ('無効' if ext.get('disabled') else '有効'))
+    elif ext.get('present') is False:
+        parts.append('拡張: 未導入')
+    chrome = d.get('chrome_running')
+    parts.append('Chrome: ' + ('起動中' if chrome else '停止中?' if chrome is False else '不明'))
+    age = d.get('age_hours')
+    if age is None:
+        parts.append('観測: なし')
+    elif age < 1 / 6:
+        parts.append('観測: たった今')
+    elif age < 1:
+        parts.append(f'観測: 約{age * 60:.0f}分前')
+    else:
+        parts.append(f'観測: 約{age:.1f}時間前')
+    return ' / '.join(parts)
 
 
 def register(extension_id):
