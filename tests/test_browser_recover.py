@@ -57,10 +57,49 @@ def test_extension_states_defer_without_driving_ui(tmp_path, monkeypatch):
     monkeypatch.setattr(r, 'app_dir', lambda: tmp_path)
     monkeypatch.setattr(claude_browser, 'diagnose',
                         lambda *a, **k: diag(extension={'present': False, 'disabled': False, 'profiles': []}))
-    monkeypatch.setattr(r, 'user_active', lambda *a, **k: True)
+    monkeypatch.setattr(r, 'idle_ms', lambda: 100.0)
     out = r.maybe_auto_repair(now=3000.0)
     assert out == {'acted': False, 'reason': 'user_active', 'class': 'extension_missing'}
-    monkeypatch.setattr(r, 'user_active', lambda *a, **k: False)
+    assert not (tmp_path / r.ATTEMPT_NAME).exists()
+
+
+def test_extension_missing_triggers_driver_once(tmp_path, monkeypatch):
+    import sys
+    import browser_recover as r
+    import claude_browser
+    monkeypatch.setattr(r, 'app_dir', lambda: tmp_path)
+    monkeypatch.setattr(claude_browser, 'diagnose',
+                        lambda *a, **k: diag(extension={'present': False, 'disabled': False, 'profiles': []}))
+    monkeypatch.setattr(r, 'idle_ms', lambda: 60000.0)
+    calls = []
+    monkeypatch.setattr(r, '_run_gui_load', lambda *a: calls.append(a) or (True, 'loaded'))
+    out = r.maybe_auto_repair(now=3000.0)
+    assert out == {'acted': True, 'reason': 'extension_reloaded', 'class': 'extension_missing'}
+    assert len(calls) == 1
+    out = r.maybe_auto_repair(now=3000.0 + 3600)
+    assert out['reason'] == 'cooldown' and len(calls) == 1
+
+
+def test_extension_driver_abort_maps_to_user_active(tmp_path, monkeypatch):
+    import browser_recover as r
+    import claude_browser
+    monkeypatch.setattr(r, 'app_dir', lambda: tmp_path)
+    monkeypatch.setattr(claude_browser, 'diagnose',
+                        lambda *a, **k: diag(extension={'present': True, 'disabled': True, 'profiles': ['Default']}))
+    monkeypatch.setattr(r, 'idle_ms', lambda: 60000.0)
+    monkeypatch.setattr(r, '_run_gui_load', lambda *a: (False, 'aborted_user_active'))
+    out = r.maybe_auto_repair(now=3000.0)
+    assert out == {'acted': False, 'reason': 'user_active', 'class': 'extension_disabled'}
+
+
+def test_extension_driver_unavailable_without_script(tmp_path, monkeypatch):
+    import browser_recover as r
+    import claude_browser
+    monkeypatch.setattr(r, 'app_dir', lambda: tmp_path)
+    monkeypatch.setattr(claude_browser, 'diagnose',
+                        lambda *a, **k: diag(extension={'present': False, 'disabled': False, 'profiles': []}))
+    monkeypatch.setattr(r, 'idle_ms', lambda: 60000.0)
+    monkeypatch.setattr(r, 'driver_script', lambda: None)
     out = r.maybe_auto_repair(now=3000.0)
     assert out == {'acted': False, 'reason': 'needs_manual_load', 'class': 'extension_missing'}
 
@@ -77,8 +116,8 @@ def test_log_never_carries_payloads(tmp_path, monkeypatch):
     monkeypatch.setattr(r, 'app_dir', lambda: tmp_path)
     monkeypatch.setattr(claude_browser, 'diagnose',
                         lambda *a, **k: diag(extension={'present': False, 'disabled': False, 'profiles': []}))
-    monkeypatch.setattr(r, 'user_active', lambda *a, **k: True)
+    monkeypatch.setattr(r, 'idle_ms', lambda: 100.0)
     r.maybe_auto_repair(now=4000.0)
     text = (tmp_path / r.LOG_NAME).read_text(encoding='utf-8')
     assert 'CANARY-SECRET-9f8e7d' not in text
-    assert 'user_active_or_unknown' in text
+    assert 'user_active' in text

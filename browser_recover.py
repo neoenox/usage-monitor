@@ -121,6 +121,36 @@ def classify(diagnosis: dict) -> str:
     return "healthy"
 
 
+def driver_script() -> Path | None:
+    """GUI recovery driver. Present in repo runs, absent in frozen builds."""
+    candidate = Path(__file__).resolve().parent / "tools" / "recover-extension.ps1"
+    return candidate if candidate.exists() else None
+
+
+def _run_gui_load(extension_id: str, extension_dir: str) -> tuple[bool, str]:
+    """Run the driver once. The script self-aborts on competing input."""
+    import sys
+
+    script = driver_script()
+    if script is None or sys.platform != "win32":
+        return False, "driver_unavailable"
+    runner = "powershell.exe"
+    try:
+        proc = subprocess.run(
+            [runner, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+             "-ExtensionDir", extension_dir, "-ExtensionId", extension_id],
+            capture_output=True, text=True, timeout=240,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        lines = (proc.stdout or "").split()
+        if proc.returncode == 0 and ("LOADED" in lines or "PRESENT-HEALTHY" in lines):
+            return True, "loaded"
+        if "ABORT-USER-ACTIVE" in lines:
+            return False, "aborted_user_active"
+        return False, "driver_failed"
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False, "driver_error"
+
+
 def _run_host_register(extension_id: str) -> bool:
     import claude_browser
 
@@ -160,11 +190,28 @@ def maybe_auto_repair(now: float | None = None) -> dict:
         _record_attempt(now)
         log_event("host_reregister", "ok" if ok else "failed")
         return {"acted": ok, "reason": "host_reregistered" if ok else "register_failed", "class": kind}
-    # Extension states need chrome://extensions interaction, which this process
-    # must not drive while the user may be active. Record and surface instead.
-    active = user_active()
-    if active is not False:
-        log_event("repair_deferred", f"{kind}/user_active_or_unknown")
+    # Extension states trigger the GUI-load driver. The driver is handle-locked
+    # to its own window, verifies focus before its single keystroke, and aborts
+    # on competing input, so a missing extension always produces an attempt or
+    # a precise deferral reason instead of deadlocking. Cooldown allows one run.
+    import sys
+    from pathlib import Path as _Path
+
+    idle = idle_ms()
+    if idle is not None and idle < 5000:
+        # Obviously mid-burst right now: skip quietly without burning cooldown.
+        log_event("repair_deferred", f"{kind}/user_active")
         return {"acted": False, "reason": "user_active", "class": kind}
-    log_event("repair_deferred", f"{kind}/needs_manual_load")
-    return {"acted": False, "reason": "needs_manual_load", "class": kind}
+    script = driver_script()
+    if script is None or sys.platform != "win32":
+        log_event("repair_deferred", f"{kind}/needs_manual_load")
+        return {"acted": False, "reason": "needs_manual_load", "class": kind}
+    default_dir = str((_Path(__file__).resolve().parent / "browser-extension"))
+    ok, detail = _run_gui_load(diagnosis.get("extension_id") or claude_browser.extension_id(), default_dir)
+    _record_attempt(now)
+    log_event("gui_load", detail)
+    if ok:
+        return {"acted": True, "reason": "extension_reloaded", "class": kind}
+    if detail == "aborted_user_active":
+        return {"acted": False, "reason": "user_active", "class": kind}
+    return {"acted": False, "reason": detail, "class": kind}
