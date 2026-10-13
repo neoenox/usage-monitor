@@ -1,0 +1,47 @@
+const {test} = require('node:test');
+const assert = require('node:assert/strict');
+
+// Minimal chrome stub so background.js top-level listeners can attach.
+const listeners = {};
+globalThis.chrome = {
+  runtime: {
+    id: 'test',
+    onMessage: {addListener: (fn) => { listeners.message = fn; }},
+    onInstalled: {addListener: (fn) => { listeners.installed = fn; }},
+    onStartup: {addListener: (fn) => { listeners.startup = fn; }},
+    sendNativeMessage: () => {},
+  },
+  action: {
+    onClicked: {addListener: (fn) => { listeners.clicked = fn; }},
+    setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {}, setTitle: async () => {},
+  },
+  storage: {local: {get: async () => ({}), set: async () => {}, remove: async () => {}}},
+  tabs: {get: async () => null, reload: async () => {}, create: async () => ({id: 1})},
+  alarms: {create: async () => {}, onAlarm: {addListener: (fn) => { listeners.alarm = fn; }}},
+};
+const bg = require('../browser-extension/background.js');
+
+test('usage tab reloads, repurposed tab recreates, missing tab creates', () => {
+  assert.equal(bg.decideRefresh(null), 'create');
+  assert.equal(bg.decideRefresh({url: 'https://claude.ai/settings/usage'}), 'reload');
+  assert.equal(bg.decideRefresh({url: 'https://claude.ai/new#settings/usage'}), 'reload');
+  assert.equal(bg.decideRefresh({url: 'https://example.com/'}), 'recreate');
+  assert.equal(bg.decideRefresh({url: 'chrome://newtab/'}), 'recreate');
+});
+
+test('sample validation keeps numbers only', () => {
+  const good = {rate_limits: {
+    five_hour: {used_percentage: 13, resets_at: 2000003600},
+    seven_day: {used_percentage: 88, resets_at: 2000172800}}};
+  assert.deepEqual(bg.validateSample(good), good);
+  assert.equal(bg.validateSample({rate_limits: {}}), null);
+  const bad = structuredClone(good);
+  bad.rate_limits.five_hour.used_percentage = 101;
+  assert.equal(bg.validateSample(bad), null);
+  const evil = {...structuredClone(good), secret: 'NEVER'};
+  assert.ok(!('secret' in bg.validateSample(evil)));
+});
+
+test('parse_state listener is registered alongside quota', () => {
+  assert.equal(typeof listeners.message, 'function');
+});
