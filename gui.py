@@ -552,6 +552,8 @@ class App(tk.Tk):
             if proc.returncode != 0:
                 self.status.config(text=f"再登録失敗: {proc.stderr.strip() or proc.stdout.strip() or proc.returncode}")
                 return
+            import browser_recover
+            browser_recover.mark_approved()
             self.status.config(text="ブラウザ連携を再登録しました。拡張の再読み込み後にアイコンをクリックしてください")
             self.diagnose_browser()
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
@@ -599,8 +601,13 @@ class App(tk.Tk):
         self.setup_codex.config(text=cx_setup)
         self.setup_claude.config(text=cl_setup)
         try:
+            import browser_recover
             import claude_browser
-            self.setup_browser.config(text="ブラウザ連携: " + claude_browser.diagnose_text(claude_browser.diagnose()))
+            repair = browser_recover.maybe_auto_repair()
+            info = claude_browser.diagnose()
+            self.setup_browser.config(text="ブラウザ連携: " + claude_browser.diagnose_text(info))
+            if repair.get("acted"):
+                self.status.config(text="ブラウザ連携のホスト登録を自動修復しました")
         except Exception:
             pass
         rl = codex.get("rate_limits", {}) or {}
