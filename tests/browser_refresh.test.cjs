@@ -17,7 +17,12 @@ globalThis.chrome = {
   },
   storage: {local: {get: async () => ({}), set: async () => {}, remove: async () => {}}},
   tabs: {get: async () => null, reload: async () => {}, create: async () => ({id: 1})},
-  alarms: {create: async () => {}, onAlarm: {addListener: (fn) => { listeners.alarm = fn; }}},
+  alarms: {
+    _existing: null, _created: 0,
+    get: async function () { return this._existing; },
+    create: async function () { this._created++; },
+    onAlarm: {addListener: (fn) => { listeners.alarm = fn; }},
+  },
 };
 const bg = require('../browser-extension/background.js');
 
@@ -27,6 +32,14 @@ test('usage tab reloads, repurposed tab recreates, missing tab creates', () => {
   assert.equal(bg.decideRefresh({url: 'https://claude.ai/new#settings/usage'}), 'reload');
   assert.equal(bg.decideRefresh({url: 'https://example.com/'}), 'recreate');
   assert.equal(bg.decideRefresh({url: 'chrome://newtab/'}), 'recreate');
+});
+
+test('login wall is droppable, user destinations are not', () => {
+  assert.equal(bg.isLoginWall('https://claude.ai/login?from=logout&reauth=1'), true);
+  assert.equal(bg.isLoginWall('https://claude.ai/settings/usage'), false);
+  assert.equal(bg.isLoginWall('https://claude.ai/new'), false);
+  assert.equal(bg.isLoginWall('https://example.com/'), false);
+  assert.equal(bg.isLoginWall('not a url'), false);
 });
 
 test('sample validation keeps numbers only', () => {
@@ -44,4 +57,14 @@ test('sample validation keeps numbers only', () => {
 
 test('parse_state listener is registered alongside quota', () => {
   assert.equal(typeof listeners.message, 'function');
+});
+
+test('missing alarm is recreated, existing alarm is untouched', async () => {
+  globalThis.chrome.alarms._existing = null;
+  globalThis.chrome.alarms._created = 0;
+  await bg.ensureAlarm();
+  assert.equal(globalThis.chrome.alarms._created, 1);
+  globalThis.chrome.alarms._existing = {name: 'usage-refresh'};
+  await bg.ensureAlarm();
+  assert.equal(globalThis.chrome.alarms._created, 1);
 });

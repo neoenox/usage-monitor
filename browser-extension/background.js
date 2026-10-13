@@ -23,6 +23,14 @@ function validateSample(sample) {
   }
   return clean;
 }
+function isLoginWall(url) {
+  // Our own dead-end: the tracked tab bounced to the login page. Safe to drop,
+  // unlike an arbitrary user destination which must be left alone.
+  try {
+    const u = new URL(url);
+    return u.origin === 'https://claude.ai' && u.pathname === '/login';
+  } catch { return false; }
+}
 function decideRefresh(tab) {
   // Pure decision for tests: never reload a repurposed destination.
   if (!tab) return 'create';
@@ -63,6 +71,10 @@ async function refreshUsage() {
     }
     if (action === 'recreate') {
       // User repurposed our tab: leave their destination alone, track a new one.
+      // Only our own login-wall dead-end is closed to avoid pinned-tab pileup.
+      if (isLoginWall(tab.url)) {
+        await chrome.tabs.remove(usageTabId).catch(() => null);
+      }
       await chrome.storage.local.remove('usageTabId');
     }
   }
@@ -72,10 +84,21 @@ chrome.action.onClicked.addListener(async () => {
   await chrome.storage.local.remove('usageTabId');
   await refreshUsage();
 });
+async function ensureAlarm() {
+  // Alarms may not survive sessions alone; re-check on every worker start.
+  try {
+    const existing = await chrome.alarms.get('usage-refresh');
+    if (!existing) await chrome.alarms.create('usage-refresh', {periodInMinutes: 5});
+  } catch {}
+}
 chrome.runtime.onInstalled.addListener(async () => {
-  await chrome.alarms.create('usage-refresh', {periodInMinutes: 5});
+  await ensureAlarm();
   await refreshUsage();
 });
-chrome.runtime.onStartup.addListener(refreshUsage);
+chrome.runtime.onStartup.addListener(async () => {
+  await ensureAlarm();
+  await refreshUsage();
+});
+ensureAlarm();
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'usage-refresh') refreshUsage(); });
-if (typeof module !== 'undefined') module.exports = {isUsage, validateSample, decideRefresh};
+if (typeof module !== 'undefined') module.exports = {isUsage, isLoginWall, validateSample, decideRefresh, ensureAlarm};
