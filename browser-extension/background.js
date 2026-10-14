@@ -56,13 +56,20 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   });
   return true;
 });
+const SUPPRESSED_NOTE = '使用状況タブは閉じられています。拡張アイコンのクリックまたはChrome再起動で再開します';
 async function openFreshUsageTab() {
   const tab = await chrome.tabs.create({url: USAGE_URL, active: false, pinned: true});
   await chrome.storage.local.set({usageTabId: tab.id});
+  await chrome.storage.local.remove('tabSuppressed');
   await status(false, 'Claude使用状況を確認中。ログイン画面の場合はログインしてください');
 }
-async function refreshUsage() {
-  const {usageTabId} = await chrome.storage.local.get('usageTabId');
+async function refreshUsage(resume = false) {
+  const {usageTabId, tabSuppressed} = await chrome.storage.local.get(['usageTabId', 'tabSuppressed']);
+  if (tabSuppressed && !resume) {
+    // The user dismissed our tab presence: stay quiet until startup or icon click.
+    await status(false, SUPPRESSED_NOTE);
+    return;
+  }
   if (Number.isInteger(usageTabId)) {
     const tab = await chrome.tabs.get(usageTabId).catch(() => null);
     const action = decideRefresh(tab);
@@ -70,18 +77,28 @@ async function refreshUsage() {
       await chrome.tabs.reload(usageTabId); return;
     }
     if (action === 'recreate') {
-      // User repurposed our tab: leave their destination alone, track a new one.
+      // User repurposed our tab: leave their destination alone.
       // Only our own login-wall dead-end is closed to avoid pinned-tab pileup.
       if (isLoginWall(tab.url)) {
         await chrome.tabs.remove(usageTabId).catch(() => null);
       }
       await chrome.storage.local.remove('usageTabId');
+    } else {
+      // Tracked tab is gone (closed): stop recreating until startup or icon click.
+      await chrome.storage.local.remove('usageTabId');
     }
+    if (!resume) {
+      await chrome.storage.local.set({tabSuppressed: true});
+      await status(false, SUPPRESSED_NOTE);
+      return;
+    }
+    await chrome.storage.local.remove('tabSuppressed');
   }
   await openFreshUsageTab();
 }
 chrome.action.onClicked.addListener(async () => {
   await chrome.storage.local.remove('usageTabId');
+  await chrome.storage.local.remove('tabSuppressed');
   await refreshUsage();
 });
 async function ensureAlarm() {
@@ -99,8 +116,9 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 chrome.runtime.onStartup.addListener(async () => {
   await ensureAlarm();
-  await refreshUsage();
+  await chrome.storage.local.remove('tabSuppressed');
+  await refreshUsage(true);
 });
 ensureAlarm();
-chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'usage-refresh') refreshUsage(); });
+chrome.alarms.onAlarm.addListener(async alarm => { if (alarm.name === 'usage-refresh') await refreshUsage(); });
 if (typeof module !== 'undefined') module.exports = {isUsage, isLoginWall, validateSample, decideRefresh, ensureAlarm};

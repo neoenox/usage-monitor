@@ -16,7 +16,7 @@ globalThis.chrome = {
     sendNativeMessage: () => {},
   },
   action: {
-    onClicked: {addListener: () => {}},
+    onClicked: {addListener: (fn) => { listeners.clicked = fn; }},
     setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {}, setTitle: async () => {},
   },
   storage: {
@@ -84,4 +84,41 @@ test('install registers alarm and opens usage tab', async () => {
   await listeners.installed();
   assert.equal(state.createdAlarms, 1);
   assert.equal(state.createdTabs.length, 1);
+});
+
+test('closed tab suppresses recreation until startup', async () => {
+  reset({alarm: {name: 'usage-refresh'}, tab: null, storage: {usageTabId: 8}});
+  await listeners.alarm({name: 'usage-refresh'});
+  assert.equal(state.createdTabs.length, 0);
+  assert.equal(state.storage.tabSuppressed, true);
+  assert.ok(!('usageTabId' in state.storage));
+  // Next alarms stay quiet: no tab pileup, no churn.
+  await listeners.alarm({name: 'usage-refresh'});
+  assert.equal(state.createdTabs.length, 0);
+});
+
+test('repurposed tab suppresses without closing user destination', async () => {
+  reset({alarm: {name: 'usage-refresh'},
+    tab: {id: 9, url: 'https://example.com/'}, storage: {usageTabId: 9}});
+  await listeners.alarm({name: 'usage-refresh'});
+  assert.deepEqual(state.removedTabs, []);
+  assert.equal(state.createdTabs.length, 0);
+  assert.equal(state.storage.tabSuppressed, true);
+});
+
+test('icon click clears suppression and opens a fresh tab', async () => {
+  reset({alarm: {name: 'usage-refresh'},
+    tab: null, storage: {usageTabId: 8, tabSuppressed: true}});
+  await listeners.clicked();
+  assert.equal(state.createdTabs.length, 1);
+  assert.ok(!('tabSuppressed' in state.storage));
+  assert.equal(state.storage.usageTabId, state.createdTabs[0].id);
+});
+
+test('startup resumes even when previously suppressed', async () => {
+  reset({alarm: {name: 'usage-refresh'},
+    tab: null, storage: {tabSuppressed: true}});
+  await listeners.startup();
+  assert.equal(state.createdTabs.length, 1);
+  assert.ok(!('tabSuppressed' in state.storage));
 });
