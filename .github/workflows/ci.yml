@@ -49,4 +49,4 @@ jobs:
           cache: pip
       - run: python -m pip install --disable-pip-version-check -r requirements.txt pytest tzdata
       - name: Run full test suite on Linux under virtual display
-        run: xvfb-run -a python -m pytest tests -q --capture=sys --cov --cov-report=term-missing
+        run: xvfb-run -a python -m pytest tests -q --capture=sys
