@@ -54,3 +54,12 @@ def test_restore_does_not_overwrite_new_user_statusline(tmp_path):
     with pytest.raises(ValueError):
         s.restore(target)
     assert json.loads(target.read_text())['statusLine']['command'] == 'new'
+
+
+def test_state_reports_numeric_export_configuration(tmp_path):
+    target = tmp_path/'settings.json'
+    assert s.state(target) == {'configured': False, 'backup': False}
+    s.install(target, 'monitor --claude-export', consent=True)
+    assert s.state(target) == {'configured': True, 'backup': True}
+    s.restore(target)
+    assert s.state(target) == {'configured': False, 'backup': False}
