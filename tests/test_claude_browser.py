@@ -158,3 +158,37 @@ def test_extension_state_unknown_without_chrome_data(monkeypatch):
     assert '拡張' not in browser.diagnose_text({'manifest_exists': False, 'manifest_origin_ok': False,
                                                 'registry_ok': False, 'chrome_running': None,
                                                 'observed_at': None, 'age_hours': None, 'extension': info})
+
+
+def test_extension_state_reports_last_load_time(tmp_path, monkeypatch):
+    import time
+    import claude_browser as browser
+    root = tmp_path / 'User Data'
+    unix = 1750000000
+    _fake_profile(root, 'Default', {
+        'disable_reasons': [],
+        'last_update_time': int((unix + 11644473600) * 1_000_000),
+    })
+    monkeypatch.setattr(browser, 'chrome_user_data', lambda: root)
+    info = browser.extension_state()
+    assert info['updated_at'] == unix
+    text = browser.diagnose_text({'manifest_exists': True, 'manifest_origin_ok': True,
+                                  'registry_ok': True, 'chrome_running': True,
+                                  'observed_at': None, 'age_hours': None, 'extension': info})
+    assert '最終読込' in text
+    assert time.strftime('%Y-%m-%d', time.localtime(unix)) in text
+
+
+def test_extension_state_omits_load_date_when_disabled(tmp_path, monkeypatch):
+    import claude_browser as browser
+    root = tmp_path / 'User Data'
+    _fake_profile(root, 'Default', {'disable_reasons': [1],
+                                    'last_update_time': int((1750000000 + 11644473600) * 1_000_000)})
+    monkeypatch.setattr(browser, 'chrome_user_data', lambda: root)
+    info = browser.extension_state()
+    assert info['disabled'] is True and info['updated_at'] == 1750000000
+    text = browser.diagnose_text({'manifest_exists': False, 'manifest_origin_ok': False,
+                                  'registry_ok': False, 'chrome_running': None,
+                                  'observed_at': None, 'age_hours': None, 'extension': info})
+    assert '無効' in text
+    assert '最終読込' not in text

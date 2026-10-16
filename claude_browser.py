@@ -11,6 +11,15 @@ import claude_export
 HOST = 'com.neoenox.usage_monitor'
 MAX_MESSAGE = 4096
 DEFAULT_EXTENSION_ID = 'eobplfaccjbfdlolmdjnalbedehgljjl'
+_CHROME_EPOCH_OFFSET = 11644473600  # seconds between 1601-01-01 and 1970-01-01
+
+
+def _chrome_time_to_unix(value):
+    """Convert a Chrome/WebKit timestamp (µs since 1601) to Unix seconds."""
+    try:
+        return int(value) / 1_000_000 - _CHROME_EPOCH_OFFSET
+    except (TypeError, ValueError):
+        return None
 
 
 def path(home: Path | None = None) -> Path:
@@ -117,19 +126,22 @@ def chrome_user_data() -> Path | None:
 def extension_state() -> dict:
     """Read-only check of our extension in local Chrome profiles.
 
-    Reads only extension metadata (presence, disable reasons) from the
-    browser's own settings files. Never touches cookies or credentials.
-    Returns {'present': bool, 'disabled': bool, 'profiles': [...]} or
-    {'present': None, ...} when Chrome data is unavailable.
+    Reads only extension metadata (presence, disable reasons, last load
+    time) from the browser's own settings files. Never touches cookies or
+    credentials. Returns {'present': bool, 'disabled': bool, 'profiles': [...],
+    'updated_at': unix|None} or {'present': None, ...} when Chrome data is
+    unavailable. ``updated_at`` is when Chrome last loaded the extension, so a
+    value older than a recent extension update means a reload is still pending.
     """
     import os
-    result: dict = {'present': None, 'disabled': None, 'profiles': []}
+    result: dict = {'present': None, 'disabled': None, 'profiles': [], 'updated_at': None}
     try:
         root = chrome_user_data()
         if root is None:
             return result
         wanted = extension_id()
         present, disabled, profiles = False, False, []
+        latest = None
         for profile in ('Default', 'Profile 2', 'Profile 3'):
             try:
                 data = json.loads((root / profile / 'Secure Preferences').read_bytes().decode('utf-8'))
@@ -145,7 +157,11 @@ def extension_state() -> dict:
                 reasons = entry.get('disable_reasons') or []
                 if reasons:
                     disabled = True
-        result.update(present=present, disabled=disabled if present else False, profiles=profiles)
+                updated = _chrome_time_to_unix(entry.get('last_update_time'))
+                if updated is not None:
+                    latest = updated if latest is None else max(latest, updated)
+        result.update(present=present, disabled=disabled if present else False,
+                      profiles=profiles, updated_at=latest)
         return result
     except Exception:
         return result
@@ -233,7 +249,15 @@ def diagnose_text(d: dict) -> str:
     parts.append('registry: ' + ('OK' if reg else '未登録' if reg is False else '-'))
     ext = d.get('extension') or {}
     if ext.get('present') is True:
-        parts.append('拡張: ' + ('無効' if ext.get('disabled') else '有効'))
+        if ext.get('disabled'):
+            parts.append('拡張: 無効')
+        else:
+            label = '拡張: 有効'
+            stamp = ext.get('updated_at')
+            if isinstance(stamp, (int, float)):
+                import time as _time
+                label += f"（最終読込 {_time.strftime('%Y-%m-%d', _time.localtime(stamp))}）"
+            parts.append(label)
     elif ext.get('present') is False:
         parts.append('拡張: 未導入')
     chrome = d.get('chrome_running')
