@@ -662,9 +662,6 @@ def main() -> int:
                 print(f"  {label:<8}: -")
     elif oauth.get("status") == "missing_token":
         print("  subscription usage: no observation. Configure numeric statusline export in the GUI settings and use official Claude Code.")
-    elif oauth.get("status") == "expired":
-        print("  subscription usage: token expired, auto-refresh failed.")
-        print("  Use claude once (or wait); next refresh retries automatically.")
     else:
         print(f"  subscription usage: error ({oauth.get('detail', '?')})")
     return 0
