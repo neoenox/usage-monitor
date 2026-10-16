@@ -1,22 +1,26 @@
 # Remaining issue implementation and verification
 
-Status: implementation and verification complete for review in draft PR #39; no merges or issue closures. Local Windows verification at commit 6dfdda2: 137 tests passed, including actual rebuilt executable numeric export, with zero skips. Combined Windows CI (unit/GUI, build, packaged export) and Linux CI passed: https://github.com/neoenox/usage-monitor/actions/runs/37763840067.
+Status (current, 2026-10-16): all review-branch work has landed on `master`. Verified at `0b3b15c`: `python -m pytest tests -q` -> 179 passed, 1 skipped; Windows and Linux CI pass on every PR. The historical review snapshot below (PR #39 / `6dfdda2` / 137 tests) is retained for the record. The only remaining open issue is #37.
 
-## PR dependency and scope
+## PR dependency and scope (historical — resolved)
 
-- PR #36: live Codex usage and persistent offline quota fallback.
-- PR #35: resilience/UI/history changes. Its implementation is merged into the review branch locally, not merged on GitHub.
-- PR #39: stacked on `fix/codex-live-quotas`, includes integration of #35 and remaining issue work. Before merging, merge/reconcile #35 and #36 and retarget/review #39 against master. Do not merge this PR independently without checking this dependency.
-- CI now includes the stacked base and Windows build/export integration. Prior #36 CI failure is not claimed fixed on that branch; verify combined branch and reconcile before merge.
+These stacked PRs were the review scaffolding for the issue work below and have all since landed on `master`:
+
+- PR #34: compare Codex rate-limit event timestamps as instants (#21) — merged 2026-10-07.
+- PR #35: resilience/UI/history changes — merged 2026-10-08.
+- PR #36: live Codex usage and persistent offline quota fallback — merged 2026-10-08.
+- PR #39: stacked on `fix/codex-live-quotas`, integrated #35 and the remaining issue work — merged 2026-10-08.
+
+The original caveats (do not merge #39 independently; reconcile #35/#36 first) no longer apply because all of them are merged. Follow-on work continued directly on `master` (#44–#51).
 
 ## Issue acceptance map
 
 | Issue | Resolution | Evidence |
 | --- | --- | --- |
 | #20 | One-pass Codex JSONL scan; no redundant file read | `tests/test_codex_single_pass.py` |
-| #22 | Original OS-store fallback integrated from #35, then superseded by approved removal of all Claude credential reading | `tests/test_retired_oauth.py`, `tests/test_monitor.py` |
+| #22 | Original OS-store fallback integrated from #35, then superseded by approved removal of all Claude credential reading. Closed as superseded 2026-10-16 (see closure record) | `tests/test_retired_oauth.py`, `tests/test_monitor.py` |
 | #23 | Non-Windows CLI no longer depends on Win32 tray import | Linux CI in `.github/workflows/ci.yml`, CLI regressions |
-| #24 | OAuth tests no longer use machine auth; retired interfaces and custom HOME are isolated | `tests/test_retired_oauth.py`, `tests/test_monitor.py` |
+| #24 | OAuth tests no longer use machine auth; retired interfaces and custom HOME are isolated. Closed as superseded 2026-10-16 (see closure record) | `tests/test_retired_oauth.py`, `tests/test_monitor.py` |
 | #25 | CLI/GUI share observed-sample forecast; malformed history cannot crash rendering | `tests/test_forecast_shared.py`, `tests/test_forecast_invalid.py` |
 | #26 | SQLite timeout/WAL from #35 | `tests/test_history_concurrency.py` |
 | #27 | Thresholds normalize to numbers before serialization | `tests/test_settings_roundtrip.py` |
@@ -24,7 +28,7 @@ Status: implementation and verification complete for review in draft PR #39; no 
 | #29 | RemainingLabel resilience from #35 | `tests/test_gui_logic.py` |
 | #30 | Load alert settings once per alert pass from #35 | GUI/tray regression tests |
 | #31 | Spec already ignored/untracked; README build uses `build.ps1` | `git ls-files '*.spec'` empty; `git check-ignore usage-monitor.spec` succeeds; exe build succeeds |
-| #37 | Approved numeric-only statusline adapter, explicit consent/replacement, backup/restore and official-tool setup guidance; no credential extraction/network refresh/model recovery | `tests/test_claude_export.py`, `tests/test_claude_setup.py`, `tests/test_no_model_refresh.py`, `tests/test_packaged_export.py`, `DISTRIBUTION.md` |
+| #37 | Approved numeric-only statusline adapter, explicit consent/replacement, backup/restore and official-tool setup guidance; no credential extraction/network refresh/model recovery. Still open: remaining scope (per-state setup matrix, dead `expired` path, browser-path ToS review, restart/offline E2E) tracked in #37 | `tests/test_claude_export.py`, `tests/test_claude_setup.py`, `tests/test_no_model_refresh.py`, `tests/test_packaged_export.py`, `DISTRIBUTION.md` |
 
 ## Security and recovery evidence
 
@@ -39,7 +43,7 @@ Status: implementation and verification complete for review in draft PR #39; no 
 
 See `DISTRIBUTION.md` for primary sources. Numeric export is not provider endorsement of this standalone monitor. Commercial/hosted Codex distribution eligibility requires confirmation. Do not advertise general commercial release readiness.
 
-Setup acceptance review, final rebuilt suite and combined CI completed. PR/issue evidence records this review state, not merge approval or unrestricted commercial release. No GitHub merge or automatic closure is authorized.
+Setup acceptance review, final rebuilt suite and combined CI completed. This section records the review state at the time, not merge approval or unrestricted commercial release; later merges and issue closures were separately authorized.
 
 ## 2026-10-16 closure record
 
