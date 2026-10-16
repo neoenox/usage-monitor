@@ -11,17 +11,43 @@ async function status(ok, text) {
   await chrome.action.setBadgeBackgroundColor({color: ok ? '#207342' : '#a35b00'});
   await chrome.action.setTitle({title: text});
 }
-chrome.runtime.onMessage.addListener((message, sender, reply) => {
-  if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || !isUsage(sender.url) || message?.type !== 'quota') return;
+function validateSample(sample) {
   const clean = {rate_limits: {}};
   for (const key of ['five_hour', 'seven_day']) {
-    const w = message.sample?.rate_limits?.[key];
+    const w = sample?.rate_limits?.[key];
     if (!w || typeof w.used_percentage !== 'number' || !Number.isFinite(w.used_percentage) || w.used_percentage < 0 || w.used_percentage > 100
         || typeof w.resets_at !== 'number' || !Number.isFinite(w.resets_at) || w.resets_at <= 0 || w.resets_at > 253402300799) {
-      reply({ok: false}); return;
+      return null;
     }
     clean.rate_limits[key] = {used_percentage: w.used_percentage, resets_at: w.resets_at};
   }
+  return clean;
+}
+function isLoginWall(url) {
+  // Our own dead-end: the tracked tab bounced to the login page. Safe to drop,
+  // unlike an arbitrary user destination which must be left alone.
+  try {
+    const u = new URL(url);
+    return u.origin === 'https://claude.ai' && u.pathname === '/login';
+  } catch { return false; }
+}
+function decideRefresh(tab) {
+  // Pure decision for tests: never reload a repurposed destination.
+  if (!tab) return 'create';
+  if (isUsage(tab.url)) return 'reload';
+  return 'recreate';
+}
+chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || !isUsage(sender.url)) return;
+  if (message?.type === 'parse_state') {
+    if (message.ok) return;
+    status(false, `使用状況を読み取れません(${message.reason || 'unknown'}) ${new Date().toLocaleTimeString()}`);
+    reply({ok: true});
+    return;
+  }
+  if (message?.type !== 'quota') return;
+  const clean = validateSample(message.sample);
+  if (!clean) { reply({ok: false}); return; }
   chrome.runtime.sendNativeMessage(HOST, clean, response => {
     const error = chrome.runtime.lastError;
     const ok = !error && response?.ok === true;
@@ -30,30 +56,69 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   });
   return true;
 });
-async function refreshUsage() {
-  const {usageTabId} = await chrome.storage.local.get('usageTabId');
-  if (Number.isInteger(usageTabId)) {
-    const tab = await chrome.tabs.get(usageTabId).catch(() => null);
-    if (tab && isUsage(tab.url)) {
-      await chrome.tabs.reload(usageTabId); return;
-    }
-    if (tab) {
-      // User navigated our tab elsewhere: never reload their new destination.
-      await status(false, '使用状況タブを開くには拡張アイコンをクリックしてください');
-      return;
-    }
-  }
+const SUPPRESSED_NOTE = '使用状況タブは閉じられています。拡張アイコンのクリックまたはChrome再起動で再開します';
+async function openFreshUsageTab() {
   const tab = await chrome.tabs.create({url: USAGE_URL, active: false, pinned: true});
   await chrome.storage.local.set({usageTabId: tab.id});
+  await chrome.storage.local.remove('tabSuppressed');
   await status(false, 'Claude使用状況を確認中。ログイン画面の場合はログインしてください');
+}
+async function refreshUsage(resume = false) {
+  const {usageTabId, tabSuppressed} = await chrome.storage.local.get(['usageTabId', 'tabSuppressed']);
+  if (tabSuppressed && !resume) {
+    // The user dismissed our tab presence: stay quiet until startup or icon click.
+    await status(false, SUPPRESSED_NOTE);
+    return;
+  }
+  if (Number.isInteger(usageTabId)) {
+    const tab = await chrome.tabs.get(usageTabId).catch(() => null);
+    const action = decideRefresh(tab);
+    if (action === 'reload') {
+      await chrome.tabs.reload(usageTabId); return;
+    }
+    if (action === 'recreate') {
+      // User repurposed our tab: leave their destination alone.
+      // Only our own login-wall dead-end is closed to avoid pinned-tab pileup.
+      if (isLoginWall(tab.url)) {
+        await chrome.tabs.remove(usageTabId).catch(() => null);
+      }
+      await chrome.storage.local.remove('usageTabId');
+    } else {
+      // Tracked tab is gone (closed): stop recreating until startup or icon click.
+      await chrome.storage.local.remove('usageTabId');
+    }
+    if (!resume) {
+      await chrome.storage.local.set({tabSuppressed: true});
+      await status(false, SUPPRESSED_NOTE);
+      return;
+    }
+    await chrome.storage.local.remove('tabSuppressed');
+  }
+  await openFreshUsageTab();
 }
 chrome.action.onClicked.addListener(async () => {
   await chrome.storage.local.remove('usageTabId');
+  await chrome.storage.local.remove('tabSuppressed');
   await refreshUsage();
 });
+async function ensureAlarm() {
+  // Alarms may not survive sessions alone; re-check on every worker start.
+  // persistAcrossSessions is explicit for Chrome 150+ (default true in 155);
+  // older versions ignore the unknown key. Idempotent: missing-only creation.
+  try {
+    const existing = await chrome.alarms.get('usage-refresh');
+    if (!existing) await chrome.alarms.create('usage-refresh', {periodInMinutes: 5, persistAcrossSessions: true});
+  } catch {}
+}
 chrome.runtime.onInstalled.addListener(async () => {
-  await chrome.alarms.create('usage-refresh', {periodInMinutes: 5});
+  await ensureAlarm();
   await refreshUsage();
 });
-chrome.runtime.onStartup.addListener(refreshUsage);
-chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'usage-refresh') refreshUsage(); });
+chrome.runtime.onStartup.addListener(async () => {
+  await ensureAlarm();
+  await chrome.storage.local.remove('tabSuppressed');
+  await refreshUsage(true);
+});
+ensureAlarm();
+chrome.alarms.onAlarm.addListener(async alarm => { if (alarm.name === 'usage-refresh') await refreshUsage(); });
+if (typeof module !== 'undefined') module.exports = {isUsage, isLoginWall, validateSample, decideRefresh, ensureAlarm};

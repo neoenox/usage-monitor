@@ -86,3 +86,75 @@ def test_oversized_native_message_is_rejected(tmp_path):
     browser.serve(io.BytesIO(struct.pack('<I', 1000000)), output, tmp_path/'quota.json')
     assert not json.loads(output.getvalue()[4:])['ok']
     assert not (tmp_path/'quota.json').exists()
+
+
+def test_diagnose_reports_missing_registration(tmp_path, monkeypatch):
+    import claude_browser as browser
+    monkeypatch.setattr(browser, 'path', lambda home=None: tmp_path / 'missing.json')
+    info = browser.diagnose()
+    assert info['manifest_exists'] is False
+    assert info['quota_exists'] is False
+    assert info['observed_at'] is None
+    assert '未登録' in browser.diagnose_text(info)
+
+
+def test_diagnose_reports_fresh_observation(tmp_path, monkeypatch):
+    import claude_browser as browser
+    target = browser.path(tmp_path)
+    browser.import_usage(payload(), target, now=2000000000)
+    monkeypatch.setattr(browser, 'path', lambda home=None: target)
+    monkeypatch.setattr(browser, 'chrome_running', lambda: True)
+    import time
+    monkeypatch.setattr(time, 'time', lambda: 2000000100.0)
+    info = browser.diagnose()
+    assert info['quota_exists'] is True
+    assert info['observed_at'] == 2000000000
+    assert '分前' in browser.diagnose_text(info) or 'たった今' in browser.diagnose_text(info)
+
+
+def test_extension_id_defaults_to_pinned_value():
+    import claude_browser as browser
+    assert browser.DEFAULT_EXTENSION_ID == 'eobplfaccjbfdlolmdjnalbedehgljjl'
+    value = browser.extension_id()
+    assert isinstance(value, str) and len(value) == 32
+
+
+def _fake_profile(root, profile, entry):
+    import json
+    import claude_browser as browser
+    target = root / profile / 'Secure Preferences'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data = {'extensions': {'settings': {}}}
+    if entry is not None:
+        data['extensions']['settings'][browser.DEFAULT_EXTENSION_ID] = entry
+    target.write_text(json.dumps(data), encoding='utf-8')
+    return root
+
+
+def test_extension_state_distinguishes_missing_disabled_enabled(tmp_path, monkeypatch):
+    import json
+    import claude_browser as browser
+    root = tmp_path / 'User Data'
+    _fake_profile(root, 'Default', None)
+    _fake_profile(root, 'Profile 2', {'disable_reasons': [1]})
+    monkeypatch.setattr(browser, 'chrome_user_data', lambda: root)
+    info = browser.extension_state()
+    assert info['present'] is True and info['disabled'] is True
+    assert 'Profile 2' in info['profiles']
+    _fake_profile(root, 'Profile 2', {'disable_reasons': []})
+    info = browser.extension_state()
+    assert info['present'] is True and info['disabled'] is False
+    _fake_profile(root, 'Profile 2', None)
+    info = browser.extension_state()
+    assert info['present'] is False and info['disabled'] is False
+    assert '未導入' in browser.diagnose_text({**browser.diagnose(), 'extension': info})
+
+
+def test_extension_state_unknown_without_chrome_data(monkeypatch):
+    import claude_browser as browser
+    monkeypatch.setattr(browser, 'chrome_user_data', lambda: None)
+    info = browser.extension_state()
+    assert info['present'] is None
+    assert '拡張' not in browser.diagnose_text({'manifest_exists': False, 'manifest_origin_ok': False,
+                                                'registry_ok': False, 'chrome_running': None,
+                                                'observed_at': None, 'age_hours': None, 'extension': info})

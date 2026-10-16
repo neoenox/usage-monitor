@@ -200,10 +200,31 @@ def history_snapshot(codex: dict, p_used: float, s_used: float,
         metrics["claude_wk"] = clw
     return metrics, resets
 
-def quota_state(left: float, cfg: dict) -> tuple[str, str]:
+def quota_state(left: float, cfg: dict, detail: str = "") -> tuple[str, str]:
     if left <= cfg["crit_at"]:
         return "残量わずか", "#b91c1c"
     if left <= cfg["warn_at"]:
+        return "注意", "#92400e"
+    # 残量%だけでは「余裕あり」に見えても、週ペース悪化や枯渇予測があれば注意に格下げ。
+    # 格上げはしない（残量が少ない場合の警告を弱めない）。
+    d = detail or ""
+    if "利用上限に達しています" in d:
+        return "残量わずか", "#b91c1c"
+    if "over pace" in d:
+        import re
+
+        m = re.search(r"経過(\d+(?:\.\d+)?)%に対し使用(\d+(?:\.\d+)?)%", d)
+        if m:
+            try:
+                expected, used = float(m.group(1)), float(m.group(2))
+                # 序盤の微量利用での誤報を避けるため、使用20%以上でのみ格下げ。
+                if expected > 0 and used >= 20:
+                    return "注意", "#92400e"
+            except ValueError:
+                return "注意", "#92400e"
+        else:
+            return "注意", "#92400e"
+    if "上限へ達する見込み" in d:
         return "注意", "#92400e"
     return "余裕あり", "#166534"
 
@@ -240,7 +261,7 @@ class RemainingLabel(ttk.Frame):
         if headline:
             self.heading.pack(fill="x", before=self.detail)
             try:
-                state, color = quota_state(float(headline.split()[1][:-1]), settings.load())
+                state, color = quota_state(float(headline.split()[1][:-1]), settings.load(), text)
             except (ValueError, IndexError, TypeError, OSError):
                 state, color = "Unavailable", "gray"
             self.badge.configure(text=state, foreground=color)
@@ -432,6 +453,16 @@ class App(tk.Tk):
         ttk.Label(config, text="Claude Code利用時の使用率を受け取ります。\nモニターは認証情報にアクセスせず、独自の認証更新も行いません。", style="Hint.TLabel", justify="left").pack(anchor="w", pady=8)
         ttk.Button(config, text="statusline連携を設定", command=self.setup_claude_export).pack(anchor="w", pady=4)
         ttk.Button(config, text="以前のstatuslineを復元", command=self.restore_claude_export).pack(anchor="w", pady=4)
+        ttk.Separator(config).pack(fill="x", pady=12)
+        ttk.Label(config, text="Claudeブラウザ連携", font=("Yu Gothic UI", 12, "bold")).pack(anchor="w")
+        self.setup_browser = ttk.Label(config, text="ブラウザ連携: 確認中…", wraplength=470, justify="left")
+        self.setup_browser.pack(anchor="w", pady=6)
+        ttk.Label(config, text="Chrome拡張が使用状況ページの数値だけをローカルへ渡します。\nCookie・資格情報・会話は取得しません。",
+                  wraplength=470, style="Hint.TLabel", justify="left").pack(anchor="w")
+        btns = ttk.Frame(config)
+        btns.pack(anchor="w", pady=4)
+        ttk.Button(btns, text="状態を診断", command=self.diagnose_browser).pack(side="left", padx=(0, 8))
+        ttk.Button(btns, text="ブラウザ連携を再登録", command=self.register_browser_host).pack(side="left")
 
     def setup_claude_export(self):
         from tkinter import messagebox
@@ -468,6 +499,65 @@ class App(tk.Tk):
             self.status.config(text="以前のstatuslineを復元しました")
         except (OSError, ValueError) as exc:
             self.status.config(text=f"復元失敗: {exc}")
+
+    def diagnose_browser(self) -> None:
+        import claude_browser
+        try:
+            info = claude_browser.diagnose()
+            self.setup_browser.config(text="ブラウザ連携: " + claude_browser.diagnose_text(info))
+            hints = []
+            if not info.get("manifest_exists") or not info.get("manifest_origin_ok"):
+                hints.append("manifest未登録")
+            if info.get("registry_ok") is False:
+                hints.append("registry未登録")
+            if info.get("chrome_running") is False:
+                hints.append("Chromeが閉じています")
+            ext = info.get("extension") or {}
+            if ext.get("present") is False:
+                hints.append("拡張未導入（chrome://extensionsで読み込みが必要）")
+            elif ext.get("disabled"):
+                hints.append("拡張が無効（chrome://extensionsで有効化）")
+            age = info.get("age_hours")
+            if age is not None and age >= 1:
+                hints.append(f"最終観測から{age:.1f}時間")
+            if hints:
+                self.status.config(text="ブラウザ連携の確認: " + " / ".join(hints) +
+                                   "。拡張アイコンのクリックと再登録を確認してください")
+            else:
+                self.status.config(text="ブラウザ連携は正常に見えます")
+        except Exception as exc:
+            self.status.config(text=f"診断失敗: {exc}")
+
+    def register_browser_host(self) -> None:
+        from tkinter import messagebox
+        import subprocess
+        import sys
+        import claude_browser
+        eid = claude_browser.extension_id()
+        if not messagebox.askyesno("ブラウザ連携の再登録",
+                                   f"この拡張IDのみ許可して再登録します:\n{eid}\n"
+                                   "対象は現在のWindowsユーザーのChrome設定のみです。\n"
+                                   "※ホスト側の再登録のみ行います。拡張自体の読み込み・有効化は\n"
+                                   "chrome://extensionsで行ってください。続けますか？",
+                                   parent=self):
+            return
+        try:
+            exe = claude_browser.host_exe()
+            if not exe.exists():
+                self.status.config(text=f"再登録失敗: {exe} がありません。先にビルドしてください")
+                return
+            proc = subprocess.run([str(exe), "--register", eid], capture_output=True,
+                                  text=True, timeout=30,
+                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if proc.returncode != 0:
+                self.status.config(text=f"再登録失敗: {proc.stderr.strip() or proc.stdout.strip() or proc.returncode}")
+                return
+            import browser_recover
+            browser_recover.mark_approved()
+            self.status.config(text="ブラウザ連携を再登録しました。拡張の再読み込み後にアイコンをクリックしてください")
+            self.diagnose_browser()
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            self.status.config(text=f"再登録失敗: {exc}")
 
     def save_thresholds(self) -> None:
         err = settings.save(self.ent_warn.get(), self.ent_crit.get())
@@ -510,6 +600,16 @@ class App(tk.Tk):
         cx_setup, cl_setup = setup_guidance(codex, claude)
         self.setup_codex.config(text=cx_setup)
         self.setup_claude.config(text=cl_setup)
+        try:
+            import browser_recover
+            import claude_browser
+            repair = browser_recover.maybe_auto_repair()
+            info = claude_browser.diagnose()
+            self.setup_browser.config(text="ブラウザ連携: " + claude_browser.diagnose_text(info))
+            if repair.get("acted"):
+                self.status.config(text="ブラウザ連携のホスト登録を自動修復しました")
+        except Exception:
+            pass
         rl = codex.get("rate_limits", {}) or {}
         pri = rl.get("primary", {}) or {}
         sec = rl.get("secondary", {}) or {}
