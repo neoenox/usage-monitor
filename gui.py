@@ -27,7 +27,35 @@ def autostart_target() -> list[str]:
     return [sys.executable, str(Path(__file__).resolve()), "--tray"]
 
 
-def setup_guidance(codex, claude):
+def claude_setup_state(claude, claude_code=None, statusline_configured=None):
+    """One of the four documented setup states, or 'unknown' when inputs are missing."""
+    if (claude.get('oauth') or {}).get('status') == 'ok':
+        return 'receiving'
+    if claude_code is False:
+        return 'no_claude_code'
+    if statusline_configured is False:
+        return 'statusline_missing'
+    if statusline_configured is True:
+        return 'awaiting_observation'
+    return 'unknown'
+
+
+def _claude_setup_inputs():
+    """Best-effort read-only inputs for the Claude setup state (never raises)."""
+    import shutil
+    try:
+        code = shutil.which('claude') is not None
+    except Exception:
+        code = None
+    try:
+        import claude_setup
+        configured = claude_setup.state(Path.home() / '.claude' / 'settings.json')['configured']
+    except Exception:
+        configured = None
+    return code, configured
+
+
+def setup_guidance(codex, claude, *, claude_code=None, statusline_configured=None):
     status = codex.get('usage_status')
     if status == 'ok':
         cx = 'Codex: 公式ツールから取得成功（認証は公式Codexが管理）'
@@ -35,10 +63,17 @@ def setup_guidance(codex, claude):
         cx = 'Codex: 公式Codexをインストールし、codex loginでログインしてください。'
     else:
         cx = 'Codex: 最新取得は未確認。公式Codexを起動し、必要ならcodex loginで再ログイン。\n' + str(codex.get('usage_detail') or '「更新」で再確認してください。')
-    if claude.get('quota_source') == 'browser' and (claude.get('oauth') or {}).get('status') == 'ok':
+    state = claude_setup_state(claude, claude_code, statusline_configured)
+    if state == 'receiving' and claude.get('quota_source') == 'browser':
         cl = 'Claude: ブラウザの使用状況から取得済み。ブラウザ連携で更新されます。'
-    elif (claude.get('oauth') or {}).get('status') == 'ok':
+    elif state == 'receiving':
         cl = 'Claude: statusline観測済み（認証状態の直接確認ではありません）。Claude Code利用時に更新されます。'
+    elif state == 'no_claude_code':
+        cl = 'Claude: Claude Code未検出。公式Claude Codeをインストールしてから「statusline連携を設定」を押してください。'
+    elif state == 'statusline_missing':
+        cl = 'Claude: Claude Code検出済み・statusline未設定。「statusline連携を設定」を押してください。'
+    elif state == 'awaiting_observation':
+        cl = 'Claude: 連携設定済み・観測待ち。Claude Codeを再起動して通常利用してください。'
     else:
         cl = 'Claude: 使用率データ待ち。statusline連携を設定し、Claude Codeを再起動して通常利用してください。'
     return cx, cl
@@ -633,7 +668,8 @@ class App(tk.Tk):
         self.btn_refresh.state(["!disabled"])
         codex, claude = m.normalize_snapshot(codex, claude)
         self._last = (codex, claude)
-        cx_setup, cl_setup = setup_guidance(codex, claude)
+        _cc, _sl = _claude_setup_inputs()
+        cx_setup, cl_setup = setup_guidance(codex, claude, claude_code=_cc, statusline_configured=_sl)
         self.setup_codex.config(text=cx_setup)
         self.setup_claude.config(text=cl_setup)
         try:

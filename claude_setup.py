@@ -24,6 +24,18 @@ def _backup(target):
     return target.with_name('usage-monitor-statusline-backup.json')
 
 
+def state(target: Path) -> dict:
+    """Read-only view of whether our numeric export is installed (never writes)."""
+    try:
+        data = _load(target)
+    except (OSError, ValueError):
+        return {'configured': False, 'backup': False}
+    line = data.get('statusLine') or {}
+    configured = (isinstance(line, dict) and line.get('type') == 'command'
+                  and '--claude-export' in str(line.get('command') or ''))
+    return {'configured': configured, 'backup': _backup(target).exists()}
+
+
 def install(target: Path, command: str, *, consent=False, replace_existing=False):
     if not consent:
         raise ValueError('使用率・リセット日時のローカル保存への同意が必要です')
