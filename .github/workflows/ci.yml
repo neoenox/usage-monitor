@@ -29,10 +29,10 @@ jobs:
         run: |
           python -m pip install pyinstaller
           ./build.ps1
-      - name: Verify packaged statusline export
+      - name: Verify packaged statusline export and browser host
         env:
           TEST_PACKAGED_EXPORT: '1'
-        run: python -m pytest tests/test_packaged_export.py -q --capture=sys
+        run: python -m pytest tests/test_packaged_export.py tests/test_packaged_browser_host.py -q --capture=sys
 
   pytest-linux:
     runs-on: ubuntu-24.04
