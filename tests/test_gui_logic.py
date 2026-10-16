@@ -123,6 +123,23 @@ def test_bad_remaining_numeric_value_is_not_parsed():
     assert gui.remaining_text("残り1..2% (使用20%)")[0] == ""
 
 
+def test_quota_state_downgrades_on_over_pace():
+    cfg = {"warn_at": 20, "crit_at": 10}
+    # スクショの再現: 残量37%/36%でもover paceなら「余裕あり」にしない
+    assert gui.quota_state(37, cfg, "over pace (経過27%に対し使用63%)")[0] == "注意"
+    assert gui.quota_state(36, cfg, "over pace (経過45%に対し使用64%)")[0] == "注意"
+    # under pace / セーフ予測は据え置き
+    assert gui.quota_state(80, cfg, "under pace (経過50%に対し使用20%)")[0] == "余裕あり"
+    assert gui.quota_state(60, cfg, "リセットまで持つ見込み")[0] == "余裕あり"
+    # 枯渇予測があれば注意に格下げ
+    assert gui.quota_state(60, cfg, "約30分後に上限へ達する見込み")[0] == "注意"
+    # 序盤の微量利用での誤報は出さない
+    assert gui.quota_state(95, cfg, "over pace (経過2%に対し使用5%)")[0] == "余裕あり"
+    # 残量が少ない場合の警告は弱めない（格上げしない）
+    assert gui.quota_state(5, cfg, "whatever")[0] == "残量わずか"
+    assert gui.quota_state(15, cfg, "under pace")[0] == "注意"
+
+
 def test_shortcut_path_quote_is_escaped(tmp_path, monkeypatch):
     import subprocess
     captured = []
