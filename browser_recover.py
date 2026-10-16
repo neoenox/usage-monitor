@@ -127,12 +127,17 @@ def driver_script() -> Path | None:
     return candidate if candidate.exists() else None
 
 
-def _run_gui_load(extension_id: str, extension_dir: str) -> tuple[bool, str]:
-    """Run the driver once. The script self-aborts on competing input."""
+def _can_drive_gui() -> bool:
+    """GUI automation is Windows-only; a seam so tests run everywhere."""
     import sys
 
+    return sys.platform == "win32"
+
+
+def _run_gui_load(extension_id: str, extension_dir: str) -> tuple[bool, str]:
+    """Run the driver once. The script self-aborts on competing input."""
     script = driver_script()
-    if script is None or sys.platform != "win32":
+    if script is None or not _can_drive_gui():
         return False, "driver_unavailable"
     runner = "powershell.exe"
     try:
@@ -194,7 +199,6 @@ def maybe_auto_repair(now: float | None = None) -> dict:
     # to its own window, verifies focus before its single keystroke, and aborts
     # on competing input, so a missing extension always produces an attempt or
     # a precise deferral reason instead of deadlocking. Cooldown allows one run.
-    import sys
     from pathlib import Path as _Path
 
     idle = idle_ms()
@@ -203,7 +207,7 @@ def maybe_auto_repair(now: float | None = None) -> dict:
         log_event("repair_deferred", f"{kind}/user_active")
         return {"acted": False, "reason": "user_active", "class": kind}
     script = driver_script()
-    if script is None or sys.platform != "win32":
+    if script is None or not _can_drive_gui():
         log_event("repair_deferred", f"{kind}/needs_manual_load")
         return {"acted": False, "reason": "needs_manual_load", "class": kind}
     default_dir = str((_Path(__file__).resolve().parent / "browser-extension"))

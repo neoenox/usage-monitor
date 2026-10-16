@@ -71,6 +71,7 @@ def test_extension_missing_triggers_driver_once(tmp_path, monkeypatch):
     monkeypatch.setattr(claude_browser, 'diagnose',
                         lambda *a, **k: diag(extension={'present': False, 'disabled': False, 'profiles': []}))
     monkeypatch.setattr(r, 'idle_ms', lambda: 60000.0)
+    monkeypatch.setattr(r, '_can_drive_gui', lambda: True)
     calls = []
     monkeypatch.setattr(r, '_run_gui_load', lambda *a: calls.append(a) or (True, 'loaded'))
     out = r.maybe_auto_repair(now=3000.0)
@@ -87,6 +88,7 @@ def test_extension_driver_abort_maps_to_user_active(tmp_path, monkeypatch):
     monkeypatch.setattr(claude_browser, 'diagnose',
                         lambda *a, **k: diag(extension={'present': True, 'disabled': True, 'profiles': ['Default']}))
     monkeypatch.setattr(r, 'idle_ms', lambda: 60000.0)
+    monkeypatch.setattr(r, '_can_drive_gui', lambda: True)
     monkeypatch.setattr(r, '_run_gui_load', lambda *a: (False, 'aborted_user_active'))
     out = r.maybe_auto_repair(now=3000.0)
     assert out == {'acted': False, 'reason': 'user_active', 'class': 'extension_disabled'}
