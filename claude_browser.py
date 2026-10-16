@@ -130,11 +130,13 @@ def extension_state() -> dict:
     time) from the browser's own settings files. Never touches cookies or
     credentials. Returns {'present': bool, 'disabled': bool, 'profiles': [...],
     'updated_at': unix|None} or {'present': None, ...} when Chrome data is
-    unavailable. ``updated_at`` is when Chrome last loaded the extension, so a
-    value older than a recent extension update means a reload is still pending.
+    unavailable. ``updated_at`` is when Chrome last loaded the extension and
+    ``loaded_path`` is the directory Chrome loaded it from, so a value older
+    than a recent extension update means a reload is still pending.
     """
     import os
-    result: dict = {'present': None, 'disabled': None, 'profiles': [], 'updated_at': None}
+    result: dict = {'present': None, 'disabled': None, 'profiles': [],
+                    'updated_at': None, 'loaded_path': None}
     try:
         root = chrome_user_data()
         if root is None:
@@ -142,6 +144,7 @@ def extension_state() -> dict:
         wanted = extension_id()
         present, disabled, profiles = False, False, []
         latest = None
+        loaded_path = None
         for profile in ('Default', 'Profile 2', 'Profile 3'):
             try:
                 data = json.loads((root / profile / 'Secure Preferences').read_bytes().decode('utf-8'))
@@ -158,13 +161,56 @@ def extension_state() -> dict:
                 if reasons:
                     disabled = True
                 updated = _chrome_time_to_unix(entry.get('last_update_time'))
-                if updated is not None:
-                    latest = updated if latest is None else max(latest, updated)
+                if updated is not None and (latest is None or updated >= latest):
+                    latest = updated
+                    loaded_path = entry.get('path')
         result.update(present=present, disabled=disabled if present else False,
-                      profiles=profiles, updated_at=latest)
+                      profiles=profiles, updated_at=latest, loaded_path=loaded_path)
         return result
     except Exception:
         return result
+
+
+def _newest_mtime(directory) -> float | None:
+    """Newest file modification time under ``directory``, or None."""
+    import os
+    newest = None
+    try:
+        if not Path(directory).is_dir():
+            return None
+        for root, _dirs, files in os.walk(directory):
+            for name in files:
+                try:
+                    mtime = (Path(root) / name).stat().st_mtime
+                except OSError:
+                    continue
+                if newest is None or mtime > newest:
+                    newest = mtime
+    except OSError:
+        return None
+    return newest
+
+
+def extension_reload_pending(info=None) -> bool | None:
+    """Read-only: True when the loaded extension predates its files on disk.
+
+    Compares Chrome's recorded last-load time with the newest file mtime in the
+    directory Chrome loaded the extension from. Works in the packaged build
+    because the source directory is read from Chrome's metadata. Returns None
+    when either signal is unavailable. Reads metadata and file timestamps only.
+    """
+    try:
+        info = info if info is not None else extension_state()
+        updated = info.get('updated_at')
+        loaded = info.get('loaded_path')
+        if not isinstance(updated, (int, float)) or not loaded:
+            return None
+        newest = _newest_mtime(loaded)
+        if newest is None:
+            return None
+        return newest > float(updated) + 1
+    except Exception:
+        return None
 
 
 def chrome_running() -> bool | None:
@@ -188,7 +234,12 @@ def diagnose(home=None) -> dict:
     try:
         result['extension'] = extension_state()
     except Exception:
-        result['extension'] = {'present': None, 'disabled': None, 'profiles': []}
+        result['extension'] = {'present': None, 'disabled': None, 'profiles': [],
+                               'updated_at': None, 'loaded_path': None}
+    try:
+        result['reload_pending'] = extension_reload_pending(result['extension'])
+    except Exception:
+        result['reload_pending'] = None
     try:
         manifest = path().parent / 'browser-native-host.json'
         result['manifest_exists'] = manifest.exists()
@@ -257,6 +308,8 @@ def diagnose_text(d: dict) -> str:
             if isinstance(stamp, (int, float)):
                 import time as _time
                 label += f"（最終読込 {_time.strftime('%Y-%m-%d', _time.localtime(stamp))}）"
+            if d.get('reload_pending') is True:
+                label += '・更新未反映→再読み込み'
             parts.append(label)
     elif ext.get('present') is False:
         parts.append('拡張: 未導入')

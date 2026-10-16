@@ -192,3 +192,49 @@ def test_extension_state_omits_load_date_when_disabled(tmp_path, monkeypatch):
                                   'observed_at': None, 'age_hours': None, 'extension': info})
     assert '無効' in text
     assert '最終読込' not in text
+
+
+def test_extension_reload_pending_detects_newer_files(tmp_path, monkeypatch):
+    import os
+    import claude_browser as browser
+    root = tmp_path / 'User Data'
+    extdir = tmp_path / 'ext'
+    extdir.mkdir()
+    manifest = extdir / 'manifest.json'
+    manifest.write_text('{}', encoding='utf-8')
+    unix = 1750000000
+    _fake_profile(root, 'Default', {
+        'disable_reasons': [],
+        'last_update_time': int((unix + 11644473600) * 1_000_000),
+        'path': str(extdir),
+    })
+    monkeypatch.setattr(browser, 'chrome_user_data', lambda: root)
+    os.utime(manifest, (unix + 100, unix + 100))
+    assert browser.extension_reload_pending() is True
+    os.utime(manifest, (unix - 100, unix - 100))
+    assert browser.extension_reload_pending() is False
+
+
+def test_extension_reload_pending_none_without_path_or_chrome_data(tmp_path, monkeypatch):
+    import claude_browser as browser
+    root = tmp_path / 'User Data'
+    _fake_profile(root, 'Default', {
+        'disable_reasons': [],
+        'last_update_time': int((1750000000 + 11644473600) * 1_000_000),
+    })
+    monkeypatch.setattr(browser, 'chrome_user_data', lambda: root)
+    assert browser.extension_reload_pending() is None
+    monkeypatch.setattr(browser, 'chrome_user_data', lambda: None)
+    assert browser.extension_reload_pending() is None
+
+
+def test_diagnose_text_flags_pending_reload():
+    import claude_browser as browser
+    text = browser.diagnose_text({
+        'manifest_exists': True, 'manifest_origin_ok': True, 'registry_ok': True,
+        'chrome_running': True, 'observed_at': None, 'age_hours': None,
+        'reload_pending': True,
+        'extension': {'present': True, 'disabled': False, 'profiles': ['Default'],
+                      'updated_at': 1750000000, 'loaded_path': 'X'},
+    })
+    assert '再読み込み' in text
