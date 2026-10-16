@@ -64,7 +64,7 @@ python -m pytest tests -q
 3. Claude Codeを再起動して通常利用する。公式statuslineのデータがないプラン・セッションでは未取得になる。使用率取得のためだけにモデルを呼び出さない。
 4. 解除・アンインストール前に「以前のstatuslineを復元」を選ぶ。他の設定は維持し、後からユーザーが変更したstatuslineは上書きしない。
 
-配布時の認証条件と制約は [DISTRIBUTION.md](docs/DISTRIBUTION.md) を参照。
+配布時の認証条件と制約は [DISTRIBUTION.md](docs/DISTRIBUTION.md) を参照。ブラウザ連携はユーザー自身の環境での個人利用を想定した補助機能で、自動的なWeb UIアクセスはAnthropicのConsumer ToS §3で制限されているため、公式・承認済みの連携として配布しないでください。
 - トレイ常駐: ホバー表示、残量20%/10%でバルーン通知、5分毎に自動更新、自動起動ON/OFF
 
 ## exe化
