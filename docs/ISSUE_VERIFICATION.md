@@ -40,3 +40,11 @@ Status: implementation and verification complete for review in draft PR #39; no 
 See `DISTRIBUTION.md` for primary sources. Numeric export is not provider endorsement of this standalone monitor. Commercial/hosted Codex distribution eligibility requires confirmation. Do not advertise general commercial release readiness.
 
 Setup acceptance review, final rebuilt suite and combined CI completed. PR/issue evidence records this review state, not merge approval or unrestricted commercial release. No GitHub merge or automatic closure is authorized.
+
+## 2026-10-16 closure record
+
+Reviewed against master after #44 (`85eb182`) retired all Claude credential reading. Both issues are obsolete as written and are closed as superseded; the retired behavior is pinned by an existing contract test, so no new regression test was required.
+
+- #22 "credentials.json無効時にOSストアへフォールバックしない": superseded by #44 — the OS-store fallback path no longer exists. Contract fixed by `tests/test_retired_oauth.py`, which forces `claude_token_from_os_store` to raise if invoked and asserts an `unsupported` result. Closed as superseded.
+- #24 "test_fetch_oauth_ok が実OSストア依存でflaky": the flaky test no longer exists on master (OAuth acceptance path retired by #44); its intent is covered by the isolated-home contract test above. Closed as superseded.
+- Branch cleanup: the issues' branches (`fix/credentials-no-os-store-fallback`, `fix/test-oauth-isolation-24`) are unlandable (target code retired) and were deleted; only `master` remains on the remote.
