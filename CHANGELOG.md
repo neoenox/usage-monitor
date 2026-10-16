@@ -1,0 +1,79 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are in JST.
+
+## [Unreleased]
+
+Everything since `v0.5.0` (2026-09-30). This release removes Claude credential
+extraction in favour of documented, credential-free observation paths.
+
+### Added
+
+- Claude browser linkage: read usage from the user's own Claude usage settings
+  page through a Chrome extension plus a local native-messaging host. Only
+  numeric utilization/reset values are forwarded; no cookies or credentials
+  (#45, #46).
+- Credential-free Claude statusline export with a consented, reversible setup:
+  the existing statusline is backed up and restored, and only numeric fields and
+  observation timestamps are stored (#37, #44).
+- First-run provider setup and observation states in the settings tab, including
+  four distinct Claude setup states (`no_claude_code`, `statusline_missing`,
+  `awaiting_observation`, `receiving`) (#37, #60).
+- Extension settings diagnosis now shows when the unpacked extension was last
+  loaded and flags a pending reload when its files are newer (#64, #65).
+- Reset-aware usage forecast segmentation; observed-sample forecasts shared
+  between the CLI and GUI (#25, #33, #51).
+- Configurable alert thresholds in the GUI and a daily morning-report balloon
+  (#27).
+- Branded application icons (#49).
+- Bilingual (Japanese/English) usage-page parser and one-click browser-linkage
+  diagnosis and recovery (#45, #46).
+
+### Changed
+
+- Claude usage is now read through the official statusline interface; the custom
+  OAuth polling path has been retired and is a no-op (#44).
+- The weekly/forecast view was simplified to a flat budget display (#33).
+- Executable builds are standardized on `build.ps1` (#31).
+
+### Fixed
+
+- Keep the last successful quota values when offline, with timestamps (#36).
+- Read current Codex quotas through the official app-server and compare
+  rate-limit event timestamps as instants rather than strings (#21, #34).
+- Never invoke a model to recover usage authentication (#37).
+- Distinguish exported observations from the legacy cached fallback and mark
+  stale values honestly (#37).
+- Normalize saved alert thresholds to numeric values and reject malformed cached
+  reset epochs (#27, #29).
+- History store: enable WAL with a busy timeout for parallel GUI/CLI writes, and
+  compute local-day boundaries across DST transitions (#14, #26).
+- GUI: schedule a single disconnected refresh tick, and create Windows shortcuts
+  with Unicode-safe `IShellLinkW` instead of ANSI scripts (#17, #28).
+
+### Security
+
+- Retired Claude credential access: the monitor no longer reads, stores, or
+  intermediates credentials, and cannot use model calls to recover them
+  (#37).
+- Documented provider authentication and distribution constraints, including
+  the browser status-page path review (restricted; personal use only) in
+  `docs/DISTRIBUTION.md` (#37, #62).
+
+### Docs
+
+- Added/updated `docs/DISTRIBUTION.md`, `docs/BROWSER_CLAUDE.md`,
+  `docs/ROLLBACK.md`, and `docs/ISSUE_VERIFICATION.md` (#37, #50, #52, #58,
+  #62, #63).
+
+### CI
+
+- Test on Linux under a virtual display in addition to Windows (#23).
+- Run checks on stacked PRs and verify the packaged numeric export and browser
+  host.
+- Measure test coverage on the Windows job with a 70% floor (#66).
+
+## [v0.5.0] - 2026-09-30
+
+Baseline tagged release. See the repository history for earlier changes.
