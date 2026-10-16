@@ -1,6 +1,8 @@
 # usage-monitor
 
-Codex と Claude Code の使用量スナップショット (Windows / Python 3.11 / 依存ゼロ except GUI)。
+Codex と Claude の使用量スナップショット (Windows / Python 3.11 / 依存ゼロ except GUI)。
+
+Claudeデスクトップ版を使う場合は [ブラウザ連携](docs/BROWSER_CLAUDE.md) を設定してください。同じアカウントのChrome使用状況タブを5分ごとに再読み込みし、数値をローカルのモニターへ渡します。Chromeを開いている必要があります。以下のstatusline連携はClaude Codeのターミナル版向けです。
 
 ## セットアップ（1から連携させる場合）
 

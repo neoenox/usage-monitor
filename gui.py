@@ -35,7 +35,9 @@ def setup_guidance(codex, claude):
         cx = 'Codex: 公式Codexをインストールし、codex loginでログインしてください。'
     else:
         cx = 'Codex: 最新取得は未確認。公式Codexを起動し、必要ならcodex loginで再ログイン。\n' + str(codex.get('usage_detail') or '「更新」で再確認してください。')
-    if (claude.get('oauth') or {}).get('status') == 'ok':
+    if claude.get('quota_source') == 'browser' and (claude.get('oauth') or {}).get('status') == 'ok':
+        cl = 'Claude: ブラウザの使用状況から取得済み。ブラウザ連携で更新されます。'
+    elif (claude.get('oauth') or {}).get('status') == 'ok':
         cl = 'Claude: statusline観測済み（認証状態の直接確認ではありません）。Claude Code利用時に更新されます。'
     else:
         cl = 'Claude: 使用率データ待ち。statusline連携を設定し、Claude Codeを再起動して通常利用してください。'
@@ -166,12 +168,14 @@ def claude_observation_label(data, key):
     if 'utilization' not in w:
         return 'Claude Codeの使用率データ待ち'
     used, reset, observed = w['utilization'], w.get('resets_at'), data['observed_at']
+    source = data.get('quota_source', 'statusline')
+    note = 'ブラウザ使用状況の観測値' if source == 'browser' else 'Claude Code利用時の観測値'
     if m.is_stale(reset):
-        return usage_cache.label(used, reset, observed, 'statusline')
+        return usage_cache.label(used, reset, observed, source)
     window, metric, tag = (300, 'claude_5h', '5h') if key == 'five_hour' else (10080, 'claude_wk', '週')
     pace = usage_pacing_text(used, window, m.iso_to_epoch(reset), h.recent(metric), now=observed)
     return (f'{tag} 残り{100-used:.0f}% (使用{used:.0f}%) '
-            f'reset={m.fmt_ts_iso(reset)}\n取得日時：{m.fmt_ts(observed)}（Claude Code利用時の観測値）\n'
+            f'reset={m.fmt_ts_iso(reset)}\n取得日時：{m.fmt_ts(observed)}（{note}）\n'
             + pace.replace('利用目安：', '観測時の利用目安：'))
 
 
@@ -601,11 +605,11 @@ class App(tk.Tk):
             for lbl, key in ((self.cl_lbl5, "five_hour"), (self.cl_lblW, "seven_day")):
                 w = oauth.get(key) or {}
                 if "utilization" in w:
-                    lbl.config(text=claude_observation_label(claude, key) if claude.get("quota_source") == "statusline" else usage_cache.label(w["utilization"], w.get("resets_at"), claude["observed_at"], claude.get("quota_source")))
-            self.cl_models.config(text="Claude Code利用時の観測値（statusline）" if claude.get("quota_source") == "statusline" else "前回取得値（オフライン参考値）")
+                    lbl.config(text=claude_observation_label(claude, key) if claude.get("quota_source") in ("statusline", "browser") else usage_cache.label(w["utilization"], w.get("resets_at"), claude["observed_at"], claude.get("quota_source")))
+            self.cl_models.config(text="ブラウザ使用状況の観測値" if claude.get("quota_source") == "browser" else "Claude Code利用時の観測値（statusline）" if claude.get("quota_source") in ("statusline", "browser") else "前回取得値（オフライン参考値）")
             cl5 = clw = None
 
-        if claude.get('quota_source') == 'statusline' and oauth.get('status') == 'ok':
+        if claude.get('quota_source') in ('statusline', 'browser') and oauth.get('status') == 'ok':
             observed = claude.get('observed_at')
             if observed and observed != getattr(self, '_claude_recorded_at', None):
                 metrics = {}
@@ -634,7 +638,7 @@ class App(tk.Tk):
         self.status.config(text="更新しました（Codexは公式アカウントから取得）" if codex.get("usage_status") == "ok"
                            else "更新しました（Codex使用量は未取得）" if not codex.get("has_rate")
                            else "更新しました（Codexはローカル履歴）")
-        if codex.get("quota_cached") or (claude.get("quota_cached") and claude.get("quota_source") != "statusline"):
+        if codex.get("quota_cached") or (claude.get("quota_cached") and claude.get("quota_source") not in ("statusline", "browser")):
             self.status.config(text="更新失敗：前回取得値を表示しています")
             self.freshness.config(text="表示は前回成功時の値です（各枠の取得日時を参照）")
         if getattr(self, "tray", None):
@@ -686,6 +690,18 @@ class App(tk.Tk):
             self._schedule_tick()
             return
         codex, claude = self._last
+        if claude.get('quota_source') in ('statusline', 'browser'):
+            import claude_browser
+            observation_home = claude.get('observation_home')
+            observed, source = claude_browser.latest(Path(observation_home) if observation_home else None)
+            if observed.get('observed_at', 0) > (claude.get('observed_at') or 0):
+                updated = dict(claude, oauth=observed, quota_source=source,
+                               observed_at=observed['observed_at'], quota_cached=True)
+                previous_update = getattr(self, '_updated_at', None)
+                self._render(codex, updated)
+                if previous_update is not None:
+                    self._updated_at = previous_update
+                return
         if codex.get("quota_cached") or claude.get("quota_cached"):
             import usage_cache
             for data, source, field, rows in (
@@ -696,8 +712,8 @@ class App(tk.Tk):
                     for lbl, key in rows:
                         w = data[source].get(key) or {}
                         if field in w:
-                            lbl.config(text=claude_observation_label(data, key) if data.get("quota_source") == "statusline" else usage_cache.label(w[field], w.get("resets_at"), data["observed_at"], data.get("quota_source")))
-            self.freshness.config(text="各枠の取得日時を参照（Claudeは利用時の観測値）" if claude.get("quota_source") == "statusline" and not codex.get("quota_cached") else "表示は前回成功時の値です（各枠の取得日時を参照）")
+                            lbl.config(text=claude_observation_label(data, key) if data.get("quota_source") in ("statusline", "browser") else usage_cache.label(w[field], w.get("resets_at"), data["observed_at"], data.get("quota_source")))
+            self.freshness.config(text="各枠の取得日時を参照（Claudeは利用時の観測値）" if claude.get("quota_source") in ("statusline", "browser") and not codex.get("quota_cached") else "表示は前回成功時の値です（各枠の取得日時を参照）")
         codex, _ = m.normalize_snapshot(codex, {})
         self._last = (codex, claude)
         if not codex.get("has_rate"):

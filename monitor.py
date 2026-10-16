@@ -503,8 +503,8 @@ def scan_claude(home: Path) -> dict:
                     cache_r += int(u.get("cache_read_input_tokens") or 0)
         except Exception:
             continue
-    import claude_export
-    oauth = claude_export.read(claude_export.path(None if _same_home(home) else home))
+    import claude_browser
+    oauth, quota_source = claude_browser.latest(None if _same_home(home) else home)
     return {
         "files": len(files),
         "messages": msgs,
@@ -514,7 +514,8 @@ def scan_claude(home: Path) -> dict:
         "cache_read": cache_r,
         "total": inp + out,
         "oauth": oauth,
-        "quota_source": "statusline",
+        "quota_source": quota_source,
+        "observation_home": None if _same_home(home) else str(home),
         "quota_cached": oauth.get("status") == "ok",
         "observed_at": oauth.get("observed_at"),
     }

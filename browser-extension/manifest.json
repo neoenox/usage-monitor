@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Usage Monitor - Claude使用率連携",
+  "version": "0.1.0",
+  "description": "Claude使用状況ページの使用率とリセット時刻をローカルのUsage Monitorへ渡します。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnryqvMN+o/w5YZai2ns083IL0fnll/GprKFnvowZctxj6t1e+PPDMJ9eOBbwnJai/p5aFibmxDRfoKjYredrj6BbpG1TsJL18FcLVpOISbVpbTj4FiWJ0ka3Dsen/Aq2g259Y37OZVCoBTRCPH3iZhK5uGyDH7S47sWw+FV5fH7qSYl6oTcLdipXLTQxzlvfdkdR8ap0avp/EGAPR+VlaRKJisD7YhGyLmgFQqddlEY8P5P9OsAtTN8qk3JO93gl1lTVr4VEgp861gvTwM8Cpue64LjgX0Ic5l+o9zeT2nu70ZsP4OSaHX7b1F2qFmu8hptlmi+w0+0e213Hp1etrwIDAQAB",
+  "permissions": [
+    "nativeMessaging",
+    "alarms",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://claude.ai/new*",
+    "https://claude.ai/settings/usage*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Claude使用状況を開いて連携"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claude.ai/new*",
+        "https://claude.ai/settings/usage*"
+      ],
+      "js": [
+        "parser.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
