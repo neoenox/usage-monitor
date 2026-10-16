@@ -1,0 +1,12 @@
+[run]
+source = .
+omit =
+    tests/*
+    */tests/*
+    .pytest_cache/*
+    build/*
+    dist/*
+
+[report]
+show_missing = true
+fail_under = 70
