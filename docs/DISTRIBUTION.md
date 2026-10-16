@@ -1,6 +1,6 @@
 # Distribution and authentication constraints
 
-Checked against official documentation on 2026-10-08. This is engineering guidance, not legal advice. Distribution approval is not implied by a successful local test.
+Checked against official documentation on 2026-10-08; browser status-page path re-reviewed against primary sources on 2026-10-16. This is engineering guidance, not legal advice. Distribution approval is not implied by a successful local test.
 
 ## Codex
 
@@ -41,7 +41,11 @@ The separate Chrome extension path is also approved for local use. It runs in th
 
 Distribution choice: keep the in-GUI settings panel and the manual `chrome://extensions` load (no installer). The user's existing Claude Code statusline is backed up and restored; while the monitor is active its display is replaced by the numeric export, and `claude_setup.py` provides the restore path.
 
-A primary-source ToS/policy review of this browser path is still required before any general distribution (tracked in #37 as T3).
+### Browser path primary-source review (2026-10-16)
+
+Anthropic's [Consumer Terms of Service](https://www.anthropic.com/legal/consumer-terms) §3 restricts, for Claude.ai and consumer plans: crawling, scraping or otherwise harvesting data other than as permitted (§3(4)), and accessing the Services through automated or non-human means (bot, script) unless via an API key or where otherwise explicitly permitted (§3(7)). The [Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance) page adds that Anthropic reserves the right to enforce these restrictions without prior notice.
+
+The extension's background reload of `claude.ai/settings/usage` on a timer is automated access to the consumer web service, so it is **not cleared** under those terms. It remains a personal, at-your-own-risk convenience: it must not be presented as an official or provider-approved integration, and it must not be distributed as a supported feature for general use. This is an engineering reading of the published terms, not legal advice.
 
 ## Release gate
 
@@ -50,9 +54,9 @@ A primary-source ToS/policy review of this browser path is still required before
 - [x] Add provider setup guidance, consent, existing-statusline backup and uninstall/restore instructions.
 - [x] Test synthetic missing-tool/error states, expired/missing windows, offline, restart and recovery. No real account expiry is forced and Claude authentication is intentionally not inspected.
 - [x] Verify numeric whitelist and synthetic secret exclusion in quota cache and packaged export. No real credentials are used in these tests; this is not an exhaustive forensic scan of every local artifact.
-- [ ] Complete primary-source ToS/policy review of the browser status-page path before general distribution (#37 / T3).
+- [x] Review the browser status-page path against primary sources. Outcome: restricted — automated web-UI access is not permitted under Consumer ToS §3(4)/(7); personal use only, not distributed as official (see above).
 - [ ] Confirm Codex eligibility for the intended local/open-source/commercial/hosted distribution.
 
 ## Distribution scope (current)
 
-Until the Codex eligibility question above is confirmed, the project targets local, self-hosted and open-source use. Commercial or hosted distribution is not cleared, and the current build must not be advertised as ready for general commercial distribution.
+Until the Codex eligibility question above is confirmed, the project targets local, self-hosted and open-source use. Commercial or hosted distribution is not cleared, and the current build must not be advertised as ready for general commercial distribution. The browser status-page path is a personal-use convenience only (see the primary-source review above) and must not be bundled as a supported integration in any distribution.
