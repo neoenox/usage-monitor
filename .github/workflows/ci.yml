@@ -4,7 +4,9 @@ on:
   push:
     branches: [master]
   pull_request:
-    branches: [master, 'fix/codex-live-quotas']
+    # Run on PRs to any branch so stacked PRs (base = another feature branch)
+    # get the same quality gate as PRs to master.
+    branches: ['**']
 
 jobs:
   pytest:
