@@ -35,12 +35,24 @@ Availability is limited: quota data appears only for eligible subscriptions/gate
 
 This documented interface is preferable to credential extraction, but it is not an explicit provider endorsement of this standalone monitor. [Authentication documentation](https://code.claude.com/docs/en/authentication) distinguishes subscription login from Console/API billing; `setup-token` does not waive third-party credential policy.
 
+## Approved browser status-page observation
+
+The separate Chrome extension path is also approved for local use. It runs in the user's own Chrome, signed into their own account, and reloads the usage settings page on a 5-minute alarm. It forwards only numeric utilization and reset values to a local host over Chrome native messaging: no cookies, credentials, or transcripts are read or stored, and nothing is sent off the machine. The extension never inspects authentication state beyond extension presence/enabled/disabled. This observes the user's own already-authenticated page rather than performing an independent provider-API poll.
+
+Distribution choice: keep the in-GUI settings panel and the manual `chrome://extensions` load (no installer). The user's existing Claude Code statusline is backed up and restored; while the monitor is active its display is replaced by the numeric export, and `claude_setup.py` provides the restore path.
+
+A primary-source ToS/policy review of this browser path is still required before any general distribution (tracked in #37 as T3).
+
 ## Release gate
 
 - [x] Replace direct Claude credential polling with user-approved numeric export. This approval is the user's implementation choice, not provider distribution approval.
+- [x] Approve the browser status-page path (user's own logged-in page, numeric-only, local native-messaging host, no installer).
 - [x] Add provider setup guidance, consent, existing-statusline backup and uninstall/restore instructions.
 - [x] Test synthetic missing-tool/error states, expired/missing windows, offline, restart and recovery. No real account expiry is forced and Claude authentication is intentionally not inspected.
 - [x] Verify numeric whitelist and synthetic secret exclusion in quota cache and packaged export. No real credentials are used in these tests; this is not an exhaustive forensic scan of every local artifact.
+- [ ] Complete primary-source ToS/policy review of the browser status-page path before general distribution (#37 / T3).
 - [ ] Confirm Codex eligibility for the intended local/open-source/commercial/hosted distribution.
 
-Do not advertise the current build as ready for general commercial distribution.
+## Distribution scope (current)
+
+Until the Codex eligibility question above is confirmed, the project targets local, self-hosted and open-source use. Commercial or hosted distribution is not cleared, and the current build must not be advertised as ready for general commercial distribution.
