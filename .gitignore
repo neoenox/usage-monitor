@@ -6,3 +6,5 @@ dist/
 *.spec
 .history/
 outputs/
+.coverage
+htmlcov/
