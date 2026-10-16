@@ -313,6 +313,14 @@ class App(tk.Tk):
     def _set_window_icon(self) -> None:
         """タイトルバー左上のアイコン (exe埋め込みとは別に必要)。"""
         try:
+            import sys
+            from pathlib import Path
+
+            base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+            ico = base / "assets" / "app.ico"
+            if ico.exists():
+                self.iconbitmap(str(ico))
+                return
             from PIL import Image, ImageDraw
 
             S = 64
