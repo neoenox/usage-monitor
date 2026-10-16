@@ -723,7 +723,7 @@ class App(tk.Tk):
                 else:
                     clw = used
             self.cl_models.config(text=self._models_label(oauth))
-        elif oauth.get("status") in ("missing_token", "expired"):
+        elif oauth.get("status") == "missing_token":
             self.cl_bar5["value"] = 0
             self.cl_barW["value"] = 0
             self.cl_lbl5.config(text="Claude Codeの使用率データ待ち：連携設定後にClaude Codeを再起動して通常利用してください")
