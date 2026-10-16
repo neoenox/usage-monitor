@@ -586,19 +586,47 @@ class App(tk.Tk):
     def refresh(self) -> None:
         if getattr(self, "_loading", False):
             return
+        import queue
+
         self._loading = True
         self.btn_refresh.state(["disabled"])
         self.status.config(text="集計中...")
-        th = threading.Thread(target=self._load, daemon=True)
-        th.start()
+        self._results = queue.Queue()
+        threading.Thread(target=self._load, daemon=True).start()
+        self.after(100, self._poll_refresh)
 
     def _load(self) -> None:
-        home = Path.home()
-        codex = m.scan_codex(home)
-        claude = m.scan_claude(home)
-        import usage_cache
-        codex, claude = usage_cache.apply(codex, claude, h.db_path().parent / "last-usage.json")
-        self.after(0, lambda: self._render(codex, claude))
+        # Background workers never touch Tk widgets, including after().
+        try:
+            home = Path.home()
+            codex = m.scan_codex(home)
+            claude = m.scan_claude(home)
+            import usage_cache
+            codex, claude = usage_cache.apply(codex, claude, h.db_path().parent / "last-usage.json")
+            self._results.put(((codex, claude), None))
+        except Exception:
+            self._results.put((None, "使用量の取得に失敗しました"))
+
+    def _poll_refresh(self) -> None:
+        import queue
+
+        try:
+            snapshot, error = self._results.get_nowait()
+        except queue.Empty:
+            self.after(100, self._poll_refresh)
+            return
+        self._loading = False
+        if error:
+            self.btn_refresh.state(["!disabled"])
+            self.btn_refresh.config(text="再試行")
+            self.status.config(text=f"更新失敗：{error}。再試行してください。")
+            if not hasattr(self, "_last"):
+                for label in (self.lbl5, self.lblW, self.cl_lbl5, self.cl_lblW):
+                    label.config(text="取得できません。再試行してください。")
+            self._schedule_tick()
+            return
+        self.btn_refresh.config(text="最新情報に更新")
+        self._render(*snapshot)
 
     def _render(self, codex: dict, claude: dict) -> None:
         self._loading = False

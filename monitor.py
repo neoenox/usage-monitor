@@ -90,6 +90,16 @@ def fmt_countdown(target) -> str:
     return f"あと{h}時間{m}分" if h else f"あと{m}分"
 
 
+def _forecast_duration(seconds: float) -> str:
+    """Format a duration in seconds as 日/時間/分 (at least 1分)."""
+    import math
+
+    minutes = max(1, math.ceil(seconds / 60))
+    days, rest = divmod(minutes, 1440)
+    hours, minutes = divmod(rest, 60)
+    return (f"{days}日" if days else "") + (f"{hours}時間" if hours else "") + (f"{minutes}分" if minutes else "")
+
+
 def _forecast_result(used, window_min, reset_epoch, hist=(), show_date=True) -> tuple[str, int | None]:
     """Explain a forecast only when comparable samples establish a recent rate."""
     import math
@@ -107,7 +117,7 @@ def _forecast_result(used, window_min, reset_epoch, hist=(), show_date=True) -> 
     if reset_epoch <= now:
         return "リセット後のデータを待っています", None
     if used >= 100:
-        return "利用上限に達しています", None
+        return f"利用上限に達しています\n約{_forecast_duration(reset_epoch - now)}間利用できない見込み", None
     start = reset_epoch - window_min * 60
     points = []
     try:
@@ -119,14 +129,26 @@ def _forecast_result(used, window_min, reset_epoch, hist=(), show_date=True) -> 
         points.sort()
     except (TypeError, ValueError, OverflowError):
         return "履歴不足で予測できません", None
-    if len(points) < 2 or points[-1][0] - points[0][0] < 600:
-        return "履歴不足で予測できません", None
-    if any(b[1] < a[1] for a, b in zip(points, points[1:])) or used < points[-1][1]:
-        return "履歴不足で予測できません", None
+    # A decrease starts a new observed quota window. Keep only the latest
+    # continuous segment so everyday resets cannot invalidate all history.
+    boundary = 0
+    reset_seen = False
+    for index in range(1, len(points)):
+        if points[index][1] < points[index - 1][1]:
+            boundary = index
+            reset_seen = True
+    points = points[boundary:]
+    if points and used < points[-1][1]:
+        points = []
+        reset_seen = True
     # Treat the current snapshot as the newest observation before deciding
     # that usage is flat. This also recovers from historical bogus 0% samples.
-    if now > points[-1][0] and used > points[-1][1]:
+    if not points or now > points[-1][0]:
         points.append((now, used))
+    if len(points) < 2 or points[-1][0] - points[0][0] < 600:
+        if reset_seen:
+            return "リセット後の履歴を蓄積中（10分以上で予測）", None
+        return "履歴不足で予測できません", None
     delta = points[-1][1] - points[0][1]
     if delta == 0:
         return "リセットまで持つ見込み", None
@@ -137,11 +159,8 @@ def _forecast_result(used, window_min, reset_epoch, hist=(), show_date=True) -> 
         return "リセットまで持つ見込み", None
     if hit <= now:
         return "上限に達する見込み（予測時刻を経過）", None
-    minutes = max(1, math.ceil((hit - now) / 60))
-    days, rest = divmod(minutes, 1440)
-    hours, minutes = divmod(rest, 60)
-    duration = (f"{days}日" if days else "") + (f"{hours}時間" if hours else "") + (f"{minutes}分" if minutes else "")
-    return f"約{duration}後に上限へ達する見込み", int(hit)
+    return (f"約{_forecast_duration(hit - now)}後に上限へ達する見込み\n"
+            f"その後、約{_forecast_duration(reset_epoch - hit)}間利用できない見込み"), int(hit)
 
 
 def quota_forecast(used, window_min, reset_epoch, hist=(), show_date=True) -> str:

@@ -4,6 +4,10 @@ import subprocess
 
 import gui
 
+# conftest's session `app` fixture replaces gui.App.refresh with a no-op for the
+# whole session, so capture the real function at import time (before fixtures run).
+_APP_REFRESH = gui.App.refresh
+
 
 def test_set_autostart_preserves_source_mode_tray_arg(tmp_path, monkeypatch):
     captured = {}
@@ -112,11 +116,24 @@ def test_quota_forecast_distinguishes_safe_and_exhaustion(monkeypatch):
     import time
     monkeypatch.setattr(time, "time", lambda: 20000)
     assert gui.quota_forecast(20, 300, 25000, [(18800, 10), (20000, 20)]) == "リセットまで持つ見込み"
-    assert gui.quota_forecast(50, 300, 25000, [(18800, 0), (20000, 50)]) == "約20分後に上限へ達する見込み"
+    hit = gui.quota_forecast(50, 300, 25000, [(18800, 0), (20000, 50)])
+    assert hit.startswith("約20分後に上限へ達する見込み")
+    assert "その後、約" in hit and "利用できない見込み" in hit
     assert gui.quota_forecast(20, 300, 25000, [(18800, 20), (20000, 20)]) == "リセットまで持つ見込み"
-    assert gui.quota_forecast(100, 300, 25000) == "利用上限に達しています"
+    exhausted = gui.quota_forecast(100, 300, 25000)
+    assert exhausted.startswith("利用上限に達しています")
+    assert "約1時間24分間利用できない見込み" in exhausted
     assert gui.quota_forecast(20, 300, 19000) == "リセット後のデータを待っています"
-    assert gui.quota_forecast(20, 300, 25000, [(18800, 30), (20000, 20)]) == "履歴不足で予測できません"
+    assert gui.quota_forecast(20, 300, 25000, [(18800, 30), (20000, 20)]) == "リセット後の履歴を蓄積中（10分以上で予測）"
+
+
+def test_quota_forecast_uses_latest_segment_after_reset(monkeypatch):
+    import time
+    monkeypatch.setattr(time, "time", lambda: 20000)
+    # 古い履歴が大きく下がっていても(リセット)、直近の連続区間だけで予測できる
+    result = gui.quota_forecast(90, 300, 25000, [(8000, 90), (8600, 10), (19400, 80), (20000, 90)])
+    assert result.startswith("約24分後に上限へ達する見込み")
+    assert "利用できない見込み" in result
 
 
 def test_bad_remaining_numeric_value_is_not_parsed():
@@ -220,3 +237,110 @@ def test_average_usage_visible_for_both_providers_and_survives_tick(app, monkeyp
     for label in (app.lbl5, app.cl_lbl5, app.lblW, app.cl_lblW):
         assert "平均使用率：" in label.detail.cget("text")
         assert "利用目安：" in label.detail.cget("text")
+
+
+def test_refresh_starts_worker_and_polls_on_main_thread(monkeypatch):
+    scheduled = []
+    started = []
+
+    class Btn:
+        def state(self, *a): pass
+
+    class Status:
+        def config(self, **k): pass
+
+    class Dummy:
+        _loading = False
+        btn_refresh = Btn()
+        status = Status()
+
+        def after(self, delay, cb):
+            scheduled.append((delay, cb))
+
+        def _load(self): pass
+
+        def _poll_refresh(self): pass
+
+    class Th:
+        def __init__(self, target=None, daemon=None):
+            started.append(target)
+
+        def start(self): pass
+
+    monkeypatch.setattr(gui.threading, "Thread", Th)
+    dummy = Dummy()
+    _APP_REFRESH(dummy)
+
+    assert dummy._loading is True
+    assert started and started[0] == dummy._load
+    assert scheduled and scheduled[0][0] == 100
+    assert scheduled[0][1].__func__ is Dummy._poll_refresh
+
+
+def test_poll_refresh_renders_success_and_clears_loading():
+    calls = {}
+
+    class Btn:
+        def state(self, *a): pass
+        def config(self, **k): calls["btn"] = k
+
+    class Status:
+        def config(self, **k): pass
+
+    class Dummy:
+        _loading = True
+        btn_refresh = Btn()
+        status = Status()
+
+        def after(self, *a): pass
+
+        def _render(self, codex, claude):
+            calls["rendered"] = (codex, claude)
+
+    import queue
+    dummy = Dummy()
+    dummy._results = queue.Queue()
+    dummy._results.put((({"a": 1}, {"b": 2}), None))
+    gui.App._poll_refresh(dummy)
+
+    assert dummy._loading is False
+    assert calls["rendered"] == ({"a": 1}, {"b": 2})
+
+
+def test_poll_refresh_failure_re_enables_and_schedules_tick():
+    calls = {}
+
+    class Btn:
+        def state(self, *a): calls["states"] = calls.get("states", 0) + 1
+        def config(self, **k): calls["btn"] = k
+
+    class Label:
+        def config(self, **k): calls["labels"] = calls.get("labels", 0) + 1
+
+    class Status:
+        def config(self, **k): calls["status"] = k
+
+    class Dummy:
+        _loading = True
+        btn_refresh = Btn()
+        status = Status()
+        lbl5 = lblW = cl_lbl5 = cl_lblW = Label()
+
+        def after(self, *a): pass
+
+        def _schedule_tick(self): calls["tick"] = calls.get("tick", 0) + 1
+
+        def _render(self, *a):
+            raise AssertionError("must not render when the load failed")
+
+    import queue
+    dummy = Dummy()
+    dummy._results = queue.Queue()
+    dummy._results.put((None, "使用量の取得に失敗しました"))
+    gui.App._poll_refresh(dummy)
+
+    assert dummy._loading is False
+    assert calls["btn"]["text"] == "再試行"
+    assert calls["labels"] == 4
+    assert calls["tick"] == 1
+    assert "更新失敗" in calls["status"]["text"]
