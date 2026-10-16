@@ -35,10 +35,10 @@ def setup_guidance(codex, claude):
         cx = 'Codex: 公式Codexをインストールし、codex loginでログインしてください。'
     else:
         cx = 'Codex: 最新取得は未確認。公式Codexを起動し、必要ならcodex loginで再ログイン。\n' + str(codex.get('usage_detail') or '「更新」で再確認してください。')
-    if claude.get('quota_source') == 'statusline' and (claude.get('oauth') or {}).get('status') == 'ok':
-        cl = 'Claude: statusline観測済み（認証状態の直接確認ではありません）。'
+    if (claude.get('oauth') or {}).get('status') == 'ok':
+        cl = 'Claude: statusline観測済み（認証状態の直接確認ではありません）。Claude Code利用時に更新されます。'
     else:
-        cl = 'Claude: 観測は未取得。公式Claude Codeをインストールし、claude auth login。\n下のstatusline連携を設定してClaude Codeを利用してください。'
+        cl = 'Claude: 使用率データ待ち。statusline連携を設定し、Claude Codeを再起動して通常利用してください。'
     return cx, cl
 
 
@@ -82,6 +82,97 @@ def remaining_text(text: str) -> tuple[str, str]:
 
 def quota_forecast(used, window_min, reset_epoch, hist=(), show_date=True) -> str:
     return m.quota_forecast(used, window_min, reset_epoch, hist, show_date)
+
+
+def average_usage_text(used, window_min, reset_epoch, hist=(), *, allowance=None, now=None) -> str:
+    """Average observed quota consumption within the latest continuous window."""
+    import math
+    import time
+
+    prefix = "平均使用率："
+    now = time.time() if now is None else now
+    try:
+        if any(isinstance(v, bool) for v in (used, window_min, reset_epoch)):
+            return prefix + "データ不足"
+        used, window_min, reset_epoch = map(float, (used, window_min, reset_epoch))
+        if not all(math.isfinite(v) for v in (used, window_min, reset_epoch)) or not 0 <= used <= 100 or window_min <= 0:
+            return prefix + "データ不足"
+        if reset_epoch <= now:
+            return prefix + "リセット後の取得待ち"
+        start = reset_epoch - window_min * 60
+        points = []
+        for t, u in hist:
+            if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in (t, u)) or not 0 <= u <= 100:
+                return prefix + "履歴不足"
+            if start <= t <= now:
+                points.append((t, u))
+        points.sort()
+        segment = []
+        for point in points:
+            if segment and point[1] < segment[-1][1]:
+                segment = []
+            segment.append(point)
+        if segment and used < segment[-1][1]:
+            return prefix + "履歴不足"
+        if segment and used > segment[-1][1] and now > segment[-1][0]:
+            segment.append((now, used))
+        if len(segment) < 2 or segment[-1][0] - segment[0][0] < 600:
+            return prefix + "履歴不足"
+        unit_seconds, unit = (3600, "時間") if window_min <= 300 else (86400, "日")
+        rate = (segment[-1][1] - segment[0][1]) * unit_seconds / (segment[-1][0] - segment[0][0])
+        result = f"{prefix}{rate:.1f}% / {unit}"
+        if allowance is not None:
+            status = "上限到達" if used >= 100 else "目安内" if rate <= allowance else "目安超過"
+            result += f"\n利用目安：{allowance:.1f}% / {unit}まで（{status}）"
+        return result
+    except (TypeError, ValueError, OverflowError):
+        return prefix + "データ不足"
+
+
+def usage_pacing_text(used, window_min, reset_epoch, hist=(), *, now=None) -> str:
+    """Compare observed consumption with the remaining budget until reset."""
+    import math
+    import time
+
+    try:
+        if any(isinstance(v, bool) for v in (used, window_min, reset_epoch)):
+            raise ValueError
+        used, window_min, reset_epoch = map(float, (used, window_min, reset_epoch))
+        if not all(math.isfinite(v) for v in (used, window_min, reset_epoch)) or not 0 <= used <= 100 or window_min <= 0:
+            raise ValueError
+        now = time.time() if now is None else now
+        remaining = reset_epoch - now
+        if remaining <= 0:
+            raise ValueError
+        unit_seconds, unit = (3600, "時間") if window_min <= 300 else (86400, "日")
+        # Round the allowance down so the displayed target never overstates it.
+        allowance = math.floor((100 - used) * unit_seconds / remaining * 10) / 10
+        average = average_usage_text(used, window_min, reset_epoch, hist, allowance=allowance, now=now)
+        if "利用目安：" in average:
+            return average
+        status = "（上限到達）" if used >= 100 else ""
+        return f"{average}\n利用目安：{allowance:.1f}% / {unit}まで{status}"
+    except (TypeError, ValueError, OverflowError):
+        return average_usage_text(used, window_min, reset_epoch, hist, now=now)
+
+
+def usage_detail(used, window_min, reset_epoch, metric, forecast):
+    return forecast + "\n" + usage_pacing_text(used, window_min, reset_epoch, h.recent(metric))
+
+
+def claude_observation_label(data, key):
+    import usage_cache
+    w = data.get('oauth', {}).get(key) or {}
+    if 'utilization' not in w:
+        return 'Claude Codeの使用率データ待ち'
+    used, reset, observed = w['utilization'], w.get('resets_at'), data['observed_at']
+    if m.is_stale(reset):
+        return usage_cache.label(used, reset, observed, 'statusline')
+    window, metric, tag = (300, 'claude_5h', '5h') if key == 'five_hour' else (10080, 'claude_wk', '週')
+    pace = usage_pacing_text(used, window, m.iso_to_epoch(reset), h.recent(metric), now=observed)
+    return (f'{tag} 残り{100-used:.0f}% (使用{used:.0f}%) '
+            f'reset={m.fmt_ts_iso(reset)}\n取得日時：{m.fmt_ts(observed)}（Claude Code利用時の観測値）\n'
+            + pace.replace('利用目安：', '観測時の利用目安：'))
 
 
 
@@ -334,9 +425,9 @@ class App(tk.Tk):
         self.setup_claude = ttk.Label(config, text="Claude: 確認中…", wraplength=470, justify="left")
         self.setup_claude.pack(anchor="w", pady=6)
         ttk.Label(config, text="同一アカウントのサブスク利用枠が対象。API課金・他アカウント合算は対象外。", wraplength=470, style="Hint.TLabel").pack(anchor="w")
-        ttk.Label(config, text="認証情報は読み取りません。Claude Code利用時の使用率のみ保存します。\n独立したリアルタイム取得ではありません。", style="Hint.TLabel", justify="left").pack(anchor="w", pady=8)
-        ttk.Button(config, text="同意してstatusline連携を設定", command=self.setup_claude_export).pack(anchor="w")
-        ttk.Button(config, text="以前のstatuslineを復元", command=self.restore_claude_export).pack(anchor="w", pady=8)
+        ttk.Label(config, text="Claude Code利用時の使用率を受け取ります。\nモニターは認証情報にアクセスせず、独自の認証更新も行いません。", style="Hint.TLabel", justify="left").pack(anchor="w", pady=8)
+        ttk.Button(config, text="statusline連携を設定", command=self.setup_claude_export).pack(anchor="w", pady=4)
+        ttk.Button(config, text="以前のstatuslineを復元", command=self.restore_claude_export).pack(anchor="w", pady=4)
 
     def setup_claude_export(self):
         from tkinter import messagebox
@@ -430,12 +521,14 @@ class App(tk.Tk):
             self.bar5["value"] = 100 - p_used
             self.lbl5.config(text=self._codex_label(
                 "5h", p_used, pri.get("resets_at"), m.fmt_ts,
-                quota_forecast(p_used, 300, pri.get("resets_at"), h.recent("codex_5h"), False),
+                usage_detail(p_used, 300, pri.get("resets_at"), "codex_5h",
+                             quota_forecast(p_used, 300, pri.get("resets_at"), h.recent("codex_5h"), False)),
                 codex.get("new_window_5h", False)))
             self.barW["value"] = 100 - s_used
             self.lblW.config(text=self._codex_label(
                 "週", s_used, sec.get("resets_at"), m.fmt_ts,
-                m.week_status(s_used, sec.get("resets_at")),
+                usage_detail(s_used, 10080, sec.get("resets_at"), "codex_wk",
+                             m.week_status(s_used, sec.get("resets_at"))),
                 codex.get("new_window_wk", False)))
         else:
             self.bar5["value"] = 0
@@ -477,6 +570,9 @@ class App(tk.Tk):
                                         h.recent("claude_5h"), show_date=False)
                 else:
                     pace = m.week_status(used, m.iso_to_epoch(w.get("resets_at")))
+                pace = usage_detail(used, 300 if key == "five_hour" else 10080,
+                                    m.iso_to_epoch(w.get("resets_at")),
+                                    "claude_5h" if key == "five_hour" else "claude_wk", pace)
                 extra = ""
                 if claude.get(flag):
                     extra += "（新窓）"
@@ -490,10 +586,7 @@ class App(tk.Tk):
         elif oauth.get("status") in ("missing_token", "expired"):
             self.cl_bar5["value"] = 0
             self.cl_barW["value"] = 0
-            if oauth.get("status") == "expired":
-                self.cl_lbl5.config(text="認証期限切れ: claude auth login で再ログインしてください")
-            else:
-                self.cl_lbl5.config(text="未取得: Claude statuslineエクスポートを設定し、Claude Codeを利用してください")
+            self.cl_lbl5.config(text="Claude Codeの使用率データ待ち：連携設定後にClaude Codeを再起動して通常利用してください")
             self.cl_lblW.config(text="")
             self.cl_models.config(text="")
         else:
@@ -508,9 +601,22 @@ class App(tk.Tk):
             for lbl, key in ((self.cl_lbl5, "five_hour"), (self.cl_lblW, "seven_day")):
                 w = oauth.get(key) or {}
                 if "utilization" in w:
-                    lbl.config(text=usage_cache.label(w["utilization"], w.get("resets_at"), claude["observed_at"], claude.get("quota_source")))
+                    lbl.config(text=claude_observation_label(claude, key) if claude.get("quota_source") == "statusline" else usage_cache.label(w["utilization"], w.get("resets_at"), claude["observed_at"], claude.get("quota_source")))
             self.cl_models.config(text="Claude Code利用時の観測値（statusline）" if claude.get("quota_source") == "statusline" else "前回取得値（オフライン参考値）")
             cl5 = clw = None
+
+        if claude.get('quota_source') == 'statusline' and oauth.get('status') == 'ok':
+            observed = claude.get('observed_at')
+            if observed and observed != getattr(self, '_claude_recorded_at', None):
+                metrics = {}
+                for key, metric in (('five_hour', 'claude_5h'), ('seven_day', 'claude_wk')):
+                    w = oauth.get(key) or {}
+                    if 'utilization' in w and not m.is_stale(w.get('resets_at')):
+                        if not any(t == int(observed) for t, _ in h.recent(metric)):
+                            metrics[metric] = w['utilization']
+                if metrics:
+                    h.record(metrics, ts=int(observed))
+                self._claude_recorded_at = observed
 
         # 履歴記録＋グラフ
         try:
@@ -590,7 +696,7 @@ class App(tk.Tk):
                     for lbl, key in rows:
                         w = data[source].get(key) or {}
                         if field in w:
-                            lbl.config(text=usage_cache.label(w[field], w.get("resets_at"), data["observed_at"], data.get("quota_source")))
+                            lbl.config(text=claude_observation_label(data, key) if data.get("quota_source") == "statusline" else usage_cache.label(w[field], w.get("resets_at"), data["observed_at"], data.get("quota_source")))
             self.freshness.config(text="各枠の取得日時を参照（Claudeは利用時の観測値）" if claude.get("quota_source") == "statusline" and not codex.get("quota_cached") else "表示は前回成功時の値です（各枠の取得日時を参照）")
         codex, _ = m.normalize_snapshot(codex, {})
         self._last = (codex, claude)
@@ -610,11 +716,13 @@ class App(tk.Tk):
             pu, su = float(pri.get("used_percent") or 0), float(sec.get("used_percent") or 0)
             self.lbl5.config(text=self._codex_label(
                 "5h", pu, pri.get("resets_at"), m.fmt_ts,
-                quota_forecast(pu, 300, pri.get("resets_at"), h.recent("codex_5h"), False),
+                usage_detail(pu, 300, pri.get("resets_at"), "codex_5h",
+                             quota_forecast(pu, 300, pri.get("resets_at"), h.recent("codex_5h"), False)),
                 codex.get("new_window_5h", False)))
             self.lblW.config(text=self._codex_label(
                 "週", su, sec.get("resets_at"), m.fmt_ts,
-                m.week_status(su, sec.get("resets_at")),
+                usage_detail(su, 10080, sec.get("resets_at"), "codex_wk",
+                             m.week_status(su, sec.get("resets_at"))),
                 codex.get("new_window_wk", False)))
         except (TypeError, ValueError):
             pass
@@ -631,6 +739,9 @@ class App(tk.Tk):
                                             h.recent("claude_5h"), show_date=False)
                     else:
                         pace = m.week_status(used, m.iso_to_epoch(w.get("resets_at")))
+                    pace = usage_detail(used, 300 if key == "five_hour" else 10080,
+                                        m.iso_to_epoch(w.get("resets_at")),
+                                        "claude_5h" if key == "five_hour" else "claude_wk", pace)
                     extra = ""
                     if claude.get(flag):
                         extra += "（新窓）"

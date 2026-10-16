@@ -21,16 +21,15 @@ claude auth status  # {"loggedIn": true} を確認
 python -m pip install -r requirements.txt
 
 # 4. モニターを起動
-python monitor.py   # Codex: 公式CLI経由で使用量取得 / Claude: ログイン資格情報で使用量APIを自動取得
+python gui.py   # 設定タブでClaudeのstatusline連携を設定
 ```
 
 補足:
 
-- Claude の使用量 API は `claude auth login` の OAuth をそのまま使う (読取のみ・保存しない)。
-  ヘッドレス環境では `claude setup-token` 発行のトークンを環境変数
-  `CLAUDE_CODE_OAUTH_TOKEN` か `~/.claude_oauth_token` に置く方法もある。
-- Claude の会話履歴 (`~/.claude/projects`) は自動クリーンアップで消えるため、
-  トークン集計は参考値。サブスク残量は API 値が正。
+- Claudeの使用率は公式Claude Codeのstatuslineから受け取ります。モニターはClaudeの認証情報を読み取らず、OAuth更新や使用量APIへの通信を行いません。
+- 最初に設定タブでstatusline連携を設定し、Claude Codeを再起動して通常利用してください。使用率はセッションの最初のAPI応答後に届きます。
+- 更新はClaude Code利用時のみです。モニター単独でのリアルタイム取得ではありません。観測日時を明示し、期限を過ぎた値はリセット前の参考値として表示します。
+- 会話履歴のトークン集計は参考値です。使用枠の割合と区別してください。
 
 ## 使い方
 
@@ -63,7 +62,7 @@ python -m pytest tests -q
 3. Claude Codeを再起動して通常利用する。公式statuslineのデータがないプラン・セッションでは未取得になる。使用率取得のためだけにモデルを呼び出さない。
 4. 解除・アンインストール前に「以前のstatuslineを復元」を選ぶ。他の設定は維持し、後からユーザーが変更したstatuslineは上書きしない。
 
-配布時の認証条件と制約は [DISTRIBUTION.md](DISTRIBUTION.md) を参照。
+配布時の認証条件と制約は [DISTRIBUTION.md](docs/DISTRIBUTION.md) を参照。
 - トレイ常駐: ホバー表示、残量20%/10%でバルーン通知、5分毎に自動更新、自動起動ON/OFF
 
 ## exe化
@@ -74,3 +73,23 @@ python -m pytest tests -q
 pip install pyinstaller
 ./build.ps1
 ```
+
+## 平均使用率とペース配分
+
+5時間枠は時間あたり、週間枠は日あたりの平均使用率と利用目安を表示します。
+利用目安は「残りの利用枠 ÷ リセットまでの残り時間」で計算します。
+例えば残り60%・残り3時間なら、利用目安は20.0% / 時間までです。
+観測された平均が目安以内なら「目安内」、超えていれば「目安超過」と表示します。
+目安は小数第1位まで切り捨て、毎分更新します。これは現在の残量・リセット時刻に基づく配分目安です。
+平均は同じ利用枠の連続した履歴が10分以上必要ですが、利用目安は履歴不足でも表示できます。
+通信失敗時の前回取得値やリセット後の取得待ちから、新しい利用目安は計算しません。Claudeのstatusline観測値では、観測日時を基準にした平均と「観測時の利用目安」を表示します。同じ観測値を何度読み込んでも新しい履歴にしません。
+
+## フォルダー構成
+
+- ルート: 起動用プログラム・設定・ビルド手順
+- docs/: 配布条件・検証記録・ロールバック記録
+- tests/: テスト
+- assets/: アイコン素材
+- outputs/: 作業記録（screenshots / backups / diagnostics / reviews）
+- build/: ビルド中間ファイル
+- dist/: 起動用exe

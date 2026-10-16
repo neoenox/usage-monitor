@@ -19,13 +19,7 @@ from pathlib import Path
 
 __version__ = "0.5.2"
 
-CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
-CLAUDE_USAGE_BETA = "oauth-2025-04-20"
-CLAUDE_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
-CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Claude Code public OAuth client
-CLAUDE_CRED_TARGET = "Claude Code-credentials"  # OS credential store service name
-BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-              "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+
 
 
 def fmt_num(n: int) -> str:
