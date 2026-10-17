@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are in JST.
 
-## [Unreleased]
+## [v0.6.0] - 2026-10-16
 
 Everything since `v0.5.0` (2026-09-30). This release removes Claude credential
 extraction in favour of documented, credential-free observation paths.
@@ -77,3 +77,7 @@ extraction in favour of documented, credential-free observation paths.
 ## [v0.5.0] - 2026-09-30
 
 Baseline tagged release. See the repository history for earlier changes.
+
+[Unreleased]: https://github.com/neoenox/usage-monitor/compare/v0.6.0...HEAD
+[v0.6.0]: https://github.com/neoenox/usage-monitor/compare/v0.5.0...v0.6.0
+[v0.5.0]: https://github.com/neoenox/usage-monitor/releases/tag/v0.5.0
