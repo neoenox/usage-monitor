@@ -548,21 +548,7 @@ class App(tk.Tk):
         try:
             info = claude_browser.diagnose()
             self.setup_browser.config(text="ブラウザ連携: " + claude_browser.diagnose_text(info))
-            hints = []
-            if not info.get("manifest_exists") or not info.get("manifest_origin_ok"):
-                hints.append("manifest未登録")
-            if info.get("registry_ok") is False:
-                hints.append("registry未登録")
-            if info.get("chrome_running") is False:
-                hints.append("Chromeが閉じています")
-            ext = info.get("extension") or {}
-            if ext.get("present") is False:
-                hints.append("拡張未導入（chrome://extensionsで読み込みが必要）")
-            elif ext.get("disabled"):
-                hints.append("拡張が無効（chrome://extensionsで有効化）")
-            age = info.get("age_hours")
-            if age is not None and age >= 1:
-                hints.append(f"最終観測から{age:.1f}時間")
+            hints = claude_browser.diagnose_hints(info)
             if hints:
                 self.status.config(text="ブラウザ連携の確認: " + " / ".join(hints) +
                                    "。拡張アイコンのクリックと再登録を確認してください")

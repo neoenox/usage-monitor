@@ -238,3 +238,48 @@ def test_diagnose_text_flags_pending_reload():
                       'updated_at': 1750000000, 'loaded_path': 'X'},
     })
     assert '再読み込み' in text
+
+
+def test_diagnose_hints_flags_pending_reload():
+    import claude_browser as browser
+    hints = browser.diagnose_hints({
+        'manifest_exists': True, 'manifest_origin_ok': True, 'registry_ok': True,
+        'chrome_running': True, 'reload_pending': True, 'age_hours': None,
+        'extension': {'present': True, 'disabled': False},
+    })
+    assert hints == ['拡張の更新が未反映（chrome://extensionsで再読み込み）']
+
+
+def test_diagnose_hints_order_and_severity():
+    import claude_browser as browser
+    hints = browser.diagnose_hints({
+        'manifest_exists': False, 'manifest_origin_ok': False, 'registry_ok': False,
+        'chrome_running': False, 'reload_pending': True, 'age_hours': 2.5,
+        'extension': {'present': False, 'disabled': None},
+    })
+    assert hints[0] == 'manifest未登録'
+    assert 'registry未登録' in hints
+    assert 'Chromeが閉じています' in hints
+    assert '拡張未導入（chrome://extensionsで読み込みが必要）' in hints
+    assert '拡張の更新が未反映（chrome://extensionsで再読み込み）' not in hints
+    assert '最終観測から2.5時間' in hints
+
+
+def test_diagnose_hints_disabled_suppresses_reload():
+    import claude_browser as browser
+    hints = browser.diagnose_hints({
+        'manifest_exists': True, 'manifest_origin_ok': True, 'registry_ok': True,
+        'chrome_running': True, 'reload_pending': True, 'age_hours': None,
+        'extension': {'present': True, 'disabled': True},
+    })
+    assert hints == ['拡張が無効（chrome://extensionsで有効化）']
+
+
+def test_diagnose_hints_clean_when_healthy():
+    import claude_browser as browser
+    hints = browser.diagnose_hints({
+        'manifest_exists': True, 'manifest_origin_ok': True, 'registry_ok': True,
+        'chrome_running': True, 'reload_pending': False, 'age_hours': 0.2,
+        'extension': {'present': True, 'disabled': False},
+    })
+    assert hints == []
