@@ -1,6 +1,6 @@
 # Remaining issue implementation and verification
 
-Status (current, 2026-10-16): all review-branch work has landed on `master`. Verified at `0b3b15c`: `python -m pytest tests -q` -> 179 passed, 1 skipped; Windows and Linux CI pass on every PR. The historical review snapshot below (PR #39 / `6dfdda2` / 137 tests) is retained for the record. The only remaining open issue is #37.
+Status (current, 2026-10-17): all review-branch work has landed on `master` and no issue remains open. Verified at `e686ce4`: `python -m pytest tests -q` -> 199 passed, 5 skipped; Windows (with a 70% coverage floor) and Linux CI pass on every PR. Releases `v0.6.0` and `v0.6.1` are published; the `v0.6.1` downloads were re-verified after publication (see the 2026-10-17 record below). The historical review snapshot below (PR #39 / `6dfdda2` / 137 tests) is retained for the record.
 
 ## PR dependency and scope (historical — resolved)
 
@@ -28,7 +28,7 @@ The original caveats (do not merge #39 independently; reconcile #35/#36 first) n
 | #29 | RemainingLabel resilience from #35 | `tests/test_gui_logic.py` |
 | #30 | Load alert settings once per alert pass from #35 | GUI/tray regression tests |
 | #31 | Spec already ignored/untracked; README build uses `build.ps1` | `git ls-files '*.spec'` empty; `git check-ignore usage-monitor.spec` succeeds; exe build succeeds |
-| #37 | Approved numeric-only statusline adapter, explicit consent/replacement, backup/restore and official-tool setup guidance; no credential extraction/network refresh/model recovery. Still open: remaining scope (per-state setup matrix, dead `expired` path, browser-path ToS review, restart/offline E2E) tracked in #37 | `tests/test_claude_export.py`, `tests/test_claude_setup.py`, `tests/test_no_model_refresh.py`, `tests/test_packaged_export.py`, `DISTRIBUTION.md` |
+| #37 | Approved numeric-only statusline adapter, explicit consent/replacement, backup/restore and official-tool setup guidance; no credential extraction/network refresh/model recovery. Closed 2026-10-16 after the remaining scope landed: per-state setup matrix (#60), browser-path ToS review (#62), restart/offline E2E (#59) | `tests/test_claude_export.py`, `tests/test_claude_setup.py`, `tests/test_no_model_refresh.py`, `tests/test_packaged_export.py`, `DISTRIBUTION.md` |
 
 ## Security and recovery evidence
 
@@ -52,3 +52,14 @@ Reviewed against master after #44 (`85eb182`) retired all Claude credential read
 - #22 "credentials.json無効時にOSストアへフォールバックしない": superseded by #44 — the OS-store fallback path no longer exists. Contract fixed by `tests/test_retired_oauth.py`, which forces `claude_token_from_os_store` to raise if invoked and asserts an `unsupported` result. Closed as superseded.
 - #24 "test_fetch_oauth_ok が実OSストア依存でflaky": the flaky test no longer exists on master (OAuth acceptance path retired by #44); its intent is covered by the isolated-home contract test above. Closed as superseded.
 - Branch cleanup: the issues' branches (`fix/credentials-no-os-store-fallback`, `fix/test-oauth-isolation-24`) are unlandable (target code retired) and were deleted; only `master` remains on the remote.
+
+## 2026-10-17 release artifact verification (v0.6.1)
+
+Re-verified the published `v0.6.1` release downloads (not the local build) to confirm the shipped binaries match the tagged source and still work:
+
+- SHA-256 of the downloaded `usage-monitor.exe` and `usage-monitor-browser-host.exe` is byte-identical to `dist/` built from `master` (`e686ce4`).
+- Packaged numeric export (`usage-monitor.exe --claude-export`, `LOCALAPPDATA` redirected to a temp dir) exits 0, writes `claude-quota.json` with `five_hour.utilization == 25`, and does not persist the extra `secret` field.
+- Browser host: `--import` exits 0 and writes `five_hour`/`seven_day` utilization; `--register not-a-valid-id` exits non-zero without writing a manifest; a no-argument launch exits non-zero mentioning the extension origin.
+- `usage-monitor.exe` embeds the brand icon (`app.ico`).
+
+Remaining manual step (owner only, cannot be automated): reload the unpacked extension at `chrome://extensions` so the branding files on disk take effect. The settings tab now flags this as `拡張の更新が未反映（chrome://extensionsで再読み込み）` (#65, #71).
