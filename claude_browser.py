@@ -327,6 +327,28 @@ def diagnose_text(d: dict) -> str:
     return ' / '.join(parts)
 
 
+def diagnose_hints(d: dict) -> list:
+    """Actionable, severity-ordered hints for the settings tab. Pure."""
+    hints = []
+    if not d.get('manifest_exists') or not d.get('manifest_origin_ok'):
+        hints.append('manifest未登録')
+    if d.get('registry_ok') is False:
+        hints.append('registry未登録')
+    if d.get('chrome_running') is False:
+        hints.append('Chromeが閉じています')
+    ext = d.get('extension') or {}
+    if ext.get('present') is False:
+        hints.append('拡張未導入（chrome://extensionsで読み込みが必要）')
+    elif ext.get('disabled'):
+        hints.append('拡張が無効（chrome://extensionsで有効化）')
+    elif d.get('reload_pending') is True:
+        hints.append('拡張の更新が未反映（chrome://extensionsで再読み込み）')
+    age = d.get('age_hours')
+    if age is not None and age >= 1:
+        hints.append(f'最終観測から{age:.1f}時間')
+    return hints
+
+
 def register(extension_id):
     """Explicit installer action, restricted to one extension and current user."""
     import re
