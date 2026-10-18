@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are in JST.
 
+## [v0.6.2] - 2026-10-18
+
+### Fixed
+
+- Report the current release version again. `__version__` had stayed at `0.5.2`
+  while `v0.6.0` and `v0.6.1` were tagged, so the published `v0.6.1` binaries
+  printed `0.5.2` for `--version` and in the window title.
+
+### CI
+
+- Fail the suite when `monitor.__version__` drifts from the newest CHANGELOG
+  release, so a release can no longer ship a stale version string.
+
 ## [v0.6.1] - 2026-10-17
 
 ### Fixed
@@ -90,7 +103,8 @@ extraction in favour of documented, credential-free observation paths.
 
 Baseline tagged release. See the repository history for earlier changes.
 
-[Unreleased]: https://github.com/neoenox/usage-monitor/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/neoenox/usage-monitor/compare/v0.6.2...HEAD
+[v0.6.2]: https://github.com/neoenox/usage-monitor/compare/v0.6.1...v0.6.2
 [v0.6.1]: https://github.com/neoenox/usage-monitor/compare/v0.6.0...v0.6.1
 [v0.6.0]: https://github.com/neoenox/usage-monitor/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/neoenox/usage-monitor/releases/tag/v0.5.0
