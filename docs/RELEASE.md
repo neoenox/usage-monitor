@@ -60,6 +60,11 @@ touching any release. Use this after changing the workflow.
 With `publish` checked it does exactly what a tag push does, for a tag that already
 exists.
 
+The dry run checks out the tag, so the tag must be one that already embeds a version
+resource (`v0.6.3` or later) — earlier builds have no resource to verify. If the tag
+predates a helper the workflow uses, that helper is taken from `master` for the run while
+the release notes still come from the tag's own `CHANGELOG.md`.
+
 ## After the release
 
 1. Download the published assets and compare their SHA-256 with the run summary and with a
