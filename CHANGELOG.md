@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The browser extension's content script is covered now. `tests/browser_content.test.cjs`
+  pins the route gate (`/settings/usage` and the `/new#settings/usage` hash form), the
+  once-only and in-flight send guard, the 10 s polling, and the failure report throttle (the
+  same reason stays silent just inside 60 s, repeats after it, and a changed reason is never
+  throttled), driving the real `parser.readRows` through a small DOM stub — `readRows` had no
+  test either. Each of the three mutations tried against `content.js` (throttle window, poll
+  interval, once-only guard) makes the suite fail (#92).
 - The browser extension's node tests now run inside the normal pytest run, and therefore in
   CI on both platforms and in the release pipeline: `tests/test_browser_node_suite.py` drives
   `node --test` over `tests/*.test.cjs` (18 tests over `background.js` and `parser.js`).

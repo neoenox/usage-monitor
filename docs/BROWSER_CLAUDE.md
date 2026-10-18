@@ -45,4 +45,4 @@ Chrome拡張の追加とローカル連携の登録はユーザーの承認後�
 
 ## テスト
 
-拡張機能（`background.js` / `parser.js`）のJSロジックは `tests/*.test.cjs` の node テストで検証します。`python -m pytest tests -q` を実行すればこのテストも含まれます（`tests/test_browser_node_suite.py` が `node --test` を呼びます）。JSだけを直接実行する場合は `node --test "tests/**/*.test.cjs"` を使ってください。`node --test tests/` は node 22 では `MODULE_NOT_FOUND` になり、テストが失敗したように見えるため使わないでください。
+拡張機能（`background.js` / `parser.js` / `content.js`）のJSロジックは `tests/*.test.cjs` の node テストで検証します。`python -m pytest tests -q` を実行すればこのテストも含まれます（`tests/test_browser_node_suite.py` が `node --test` を呼びます）。JSだけを直接実行する場合は `node --test "tests/**/*.test.cjs"` を使ってください。`node --test tests/` は node 22 では `MODULE_NOT_FOUND` になり、テストが失敗したように見えるため使わないでください。
