@@ -1,6 +1,6 @@
 # Distribution and authentication constraints
 
-Checked against official documentation on 2026-10-08; browser status-page path re-reviewed against primary sources on 2026-10-16. This is engineering guidance, not legal advice. Distribution approval is not implied by a successful local test.
+Checked against official documentation on 2026-10-08; browser status-page path re-reviewed against primary sources on 2026-10-16; Codex eligibility re-reviewed against primary sources on 2026-10-18. This is engineering guidance, not legal advice. Distribution approval is not implied by a successful local test.
 
 ## Codex
 
@@ -8,9 +8,20 @@ The [official app-server documentation](https://developers.openai.com/codex/app-
 
 The same documentation says local or open-source applications already using app-server authentication may continue, recommends migrating to Sign in with ChatGPT, and states: **“App-server authentication has never been permitted for commercial or hosted services.”**
 
-Before commercial/hosted distribution, confirm eligibility and the [Sign in with ChatGPT](https://developers.openai.com/siwc) integration path. Do not assume that the existing-local-app exception covers every new distribution.
+Before commercial/hosted distribution, confirm eligibility and the [Sign in with ChatGPT](https://developers.openai.com/siwc) integration path (see the review below). Do not assume that the existing-local-app exception covers every new distribution.
 
 [API-key authentication](https://developers.openai.com/codex/auth) uses separate API pricing, not included ChatGPT plan credits. Do not label API billing as subscription quota. Quota windows may be null or absent, and example durations are not a fixed contract.
+
+### Codex eligibility review (2026-10-18)
+
+Re-read the primary sources for the intended scope (local, self-hosted, open-source; the user's own installed official Codex binary; local stdio; no model turn):
+
+- The quoted restriction is still current, and the same page still says local or open-source applications using app-server authentication *can continue using it* — with a migration recommendation, not a revocation. That continuation is the basis for the current scope.
+- `account/rateLimits/read` is still documented. The page now also describes a backward-compatible single-bucket `rateLimits` view, a multi-bucket `rateLimitsByLimitId` view keyed by metered `limit_id`, and an `account/rateLimits/updated` notification. The monitor's single-bucket use stays supported; the multi-bucket view is a possible future enhancement, not a requirement.
+- `clientInfo.name` identifies the client for the OpenAI Compliance Logs Platform, and new Codex integrations intended for enterprise use must contact OpenAI to be added to a known-clients list. Enterprise deployment therefore needs an explicit provider step, not just this code.
+- [Sign in with ChatGPT](https://developers.openai.com/siwc) documents ChatGPT-plan usage for open-source and locally hosted apps and publishes a self-hosted VM guide for an open-source app the user runs on their own machine; offering a *paid or remotely hosted* app instead requires the interest form (partner waitlist), not self-certification. The monitor sends no model turn, so SIWC is outside its current scope.
+
+Outcome: eligibility **is confirmed** for the intended local / self-hosted / open-source scope. Commercial or hosted distribution is **not** cleared by this review and still needs the SIWC path plus a provider agreement. Re-check if the scope changes. This is a reading of published documentation, not legal advice, and is not an endorsement from OpenAI.
 
 ## Claude: do not distribute credential extraction as supported integration
 
@@ -55,8 +66,8 @@ The extension's background reload of `claude.ai/settings/usage` on a timer is au
 - [x] Test synthetic missing-tool/error states, expired/missing windows, offline, restart and recovery. No real account expiry is forced and Claude authentication is intentionally not inspected.
 - [x] Verify numeric whitelist and synthetic secret exclusion in quota cache and packaged export. No real credentials are used in these tests; this is not an exhaustive forensic scan of every local artifact.
 - [x] Review the browser status-page path against primary sources. Outcome: restricted — automated web-UI access is not permitted under Consumer ToS §3(4)/(7); personal use only, not distributed as official (see above).
-- [ ] Confirm Codex eligibility for the intended local/open-source/commercial/hosted distribution.
+- [x] Confirm Codex eligibility for the intended local/open-source/commercial/hosted distribution. Resolved 2026-10-18 for the intended scope: local, self-hosted and open-source use is consistent with the documented continuation for local/open-source app-server applications. Commercial or hosted distribution is not cleared by this project alone — it needs the SIWC path plus a provider agreement (see the Codex eligibility review).
 
 ## Distribution scope (current)
 
-Until the Codex eligibility question above is confirmed, the project targets local, self-hosted and open-source use. Commercial or hosted distribution is not cleared, and the current build must not be advertised as ready for general commercial distribution. The browser status-page path is a personal-use convenience only (see the primary-source review above) and must not be bundled as a supported integration in any distribution.
+The project targets local, self-hosted and open-source use; that scope's Codex eligibility was confirmed against primary sources on 2026-10-18 (see the Codex eligibility review above). Commercial or hosted distribution is not cleared, and the current build must not be advertised as ready for general commercial distribution. The browser status-page path is a personal-use convenience only (see the primary-source review above) and must not be bundled as a supported integration in any distribution.

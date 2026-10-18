@@ -41,7 +41,7 @@ The original caveats (do not merge #39 independently; reconcile #35/#36 first) n
 
 ## Remaining release constraints
 
-See `DISTRIBUTION.md` for primary sources. Numeric export is not provider endorsement of this standalone monitor. Commercial/hosted Codex distribution eligibility requires confirmation. Do not advertise general commercial release readiness.
+See `DISTRIBUTION.md` for primary sources. Numeric export is not provider endorsement of this standalone monitor. Codex eligibility was re-reviewed on 2026-10-18 and is confirmed for the intended local/self-hosted/open-source scope; commercial or hosted distribution is still not cleared and needs the Sign in with ChatGPT path plus a provider agreement. Do not advertise general commercial release readiness.
 
 Setup acceptance review, final rebuilt suite and combined CI completed. This section records the review state at the time, not merge approval or unrestricted commercial release; later merges and issue closures were separately authorized.
 
@@ -95,4 +95,4 @@ Re-verified the published `v0.6.3` downloads (not the local build):
 - `usage-monitor.exe` still embeds the brand icon data (`app.ico` marker present).
 - `TEST_PACKAGED_EXPORT=1 python -m pytest tests/test_packaged_export.py tests/test_packaged_browser_host.py -q` -> 6 passed (the version-resource assertion is new; `tests/test_windows_version.py` covers the generator and the `--version` entry point in the normal suite).
 
-The `docs/DISTRIBUTION.md` release gate is unchanged: Codex eligibility for commercial/hosted distribution is still open. The manual extension reload also still applies to this release.
+The manual extension reload also still applies to this release. (The `docs/DISTRIBUTION.md` Codex gate was still open at release time; it was resolved the next day for the local/self-hosted/open-source scope — see the 2026-10-18 Codex eligibility review in `DISTRIBUTION.md`.)
