@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [v0.6.5] - 2026-10-18
+
 ### Changed
 
 - The browser extension's content script is covered now. `tests/browser_content.test.cjs`
@@ -191,7 +193,8 @@ extraction in favour of documented, credential-free observation paths.
 
 Baseline tagged release. See the repository history for earlier changes.
 
-[Unreleased]: https://github.com/neoenox/usage-monitor/compare/v0.6.4...HEAD
+[Unreleased]: https://github.com/neoenox/usage-monitor/compare/v0.6.5...HEAD
+[v0.6.5]: https://github.com/neoenox/usage-monitor/compare/v0.6.4...v0.6.5
 [v0.6.4]: https://github.com/neoenox/usage-monitor/compare/v0.6.3...v0.6.4
 [v0.6.3]: https://github.com/neoenox/usage-monitor/compare/v0.6.2...v0.6.3
 [v0.6.2]: https://github.com/neoenox/usage-monitor/compare/v0.6.1...v0.6.2
