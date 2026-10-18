@@ -1,6 +1,6 @@
 # Remaining issue implementation and verification
 
-Status (current, 2026-10-18): all review-branch work has landed on `master` and no issue remains open. Verified at `013c05d`: `python -m pytest tests -q` -> 208 passed, 6 skipped; Windows (with a 70% coverage floor, 76.93% measured) and Linux CI pass on every PR, now on Node 24 actions with no deprecation annotation. Releases `v0.6.0` through `v0.6.3` are published; the `v0.6.3` downloads were verified after publication (see the 2026-10-18 v0.6.3 record below). The historical review snapshot below (PR #39 / `6dfdda2` / 137 tests) is retained for the record.
+Status (current, 2026-10-18): all review-branch work has landed on `master` and no issue remains open. Verified at `025a243`: `python -m pytest tests -q` -> 229 passed, 6 skipped; Windows (with a 70% coverage floor, 79.13% measured) and Linux CI pass on every PR, now on Node 24 actions with no deprecation annotation. Releases `v0.6.0` through `v0.6.4` are published; `v0.6.4` is the first one built, verified and published by `.github/workflows/release.yml` from the tag push, and its downloads were checked after publication (see the 2026-10-18 v0.6.4 record below). The historical review snapshot below (PR #39 / `6dfdda2` / 137 tests) is retained for the record.
 
 ## PR dependency and scope (historical — resolved)
 
@@ -96,3 +96,45 @@ Re-verified the published `v0.6.3` downloads (not the local build):
 - `TEST_PACKAGED_EXPORT=1 python -m pytest tests/test_packaged_export.py tests/test_packaged_browser_host.py -q` -> 6 passed (the version-resource assertion is new; `tests/test_windows_version.py` covers the generator and the `--version` entry point in the normal suite).
 
 The manual extension reload also still applies to this release. (The `docs/DISTRIBUTION.md` Codex gate was still open at release time; it was resolved the next day for the local/self-hosted/open-source scope — see the 2026-10-18 Codex eligibility review in `DISTRIBUTION.md`.)
+
+## 2026-10-18 v0.6.4 release (automated pipeline)
+
+First release published by the workflow rather than by hand: the tag `v0.6.4` was pushed on
+the merge commit `025a243` and run
+[39121006809](https://github.com/neoenox/usage-monitor/actions/runs/39121006809) did the
+rest. The `Publish the release` step took the "Creating the release" branch (the release did
+not exist yet), so this run also exercised the path the earlier `workflow_dispatch` dry run
+deliberately skipped. Every step reported success.
+
+The run itself verified the tag against `master`, `monitor.__version__` and the newest
+CHANGELOG heading, ran the full suite with the coverage floor, built both executables,
+checked each version resource and printed its SHA-256, and ran the packaged tests against
+those freshly built files. Re-checked afterwards against the published downloads:
+
+- `gh release download v0.6.4 --dir <tmp> --clobber` then SHA-256 over the downloaded bytes:
+  `usage-monitor.exe` = `85A6EBD02762D3A44F88B9F0EFEA0AA5DB14A53C262AD1350AFCDA68FFE07A37`
+  (20,835,981 bytes), `usage-monitor-browser-host.exe` =
+  `C7ABC5E4A4BC63EB7041A95932E83643759C34BFEEA7A6828F180268574CFE17` (8,336,974 bytes).
+  Both equal the hashes the run printed, so the published assets are exactly the files the
+  packaged tests and version-resource checks ran against.
+- Embedded version resource: `0.6.4.0` on both executables (read back from the downloaded
+  files with `windows_version.read_file_version`).
+- Notes: the published release body is byte-for-byte the `## [v0.6.4]` section of
+  `CHANGELOG.md` (1710 characters, `release_notes.py 0.6.4 --out` compared against
+  `gh release view v0.6.4 --json body`), so the notes cannot drift from the changelog.
+- Release state: `isDraft=false`, `isPrerelease=false`, published 2026-10-18T10:55:33Z, two
+  assets with matching `digest` values.
+
+Provenance note: these assets are built on the runner, so they are **not** byte-identical to
+a local `build.ps1` build — the earlier dry run showed the same version resource
+(`0.6.3.0`) with different hashes. The `v0.6.3` record above compares against a local build
+because those assets were built locally; from `v0.6.4` on, hashes are compared against the
+run summary (see `docs/RELEASE.md`).
+
+One caveat worth recording: a single local `python -m pytest tests -q` run (on the first cold
+run after a merge) failed once inside a 120 s-timeout E2E test and did not reproduce in five
+consecutive subsequent runs; both CI jobs and the release run were green on the same commit.
+It is recorded here rather than dismissed because a repeat would abort a release mid-pipeline
+(the workflow is re-runnable, and publishing is idempotent via `--clobber`).
+
+The manual extension reload at `chrome://extensions` still applies to this release.
