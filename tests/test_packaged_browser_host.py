@@ -11,6 +11,9 @@ from pathlib import Path
 
 import pytest
 
+import monitor
+import windows_version
+
 HOST = Path("dist/usage-monitor-browser-host.exe")
 MAIN = Path("dist/usage-monitor.exe")
 
@@ -55,3 +58,9 @@ def test_host_requires_extension_origin(tmp_path):
 def test_main_exe_embeds_brand_icon():
     assert MAIN.exists(), "build dist/usage-monitor.exe first"
     assert b"app.ico" in MAIN.read_bytes()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows version resource")
+def test_main_exe_exposes_version_resource():
+    assert MAIN.exists(), "build dist/usage-monitor.exe first"
+    assert windows_version.read_file_version(MAIN) == windows_version.dotted(monitor.__version__)

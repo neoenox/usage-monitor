@@ -1218,6 +1218,13 @@ class TrayController:
 if __name__ == "__main__":
     import sys
 
+    if "--version" in sys.argv:
+        # 凍結ビルドはwindowedでコンソールを持たないため、出力できる場合のみ表示する。
+        stream = getattr(sys, "stdout", None)
+        if stream is not None:
+            print(f"usage-monitor {m.__version__}", file=stream)
+        raise SystemExit(0)
+
     if "--claude-export" in sys.argv:
         import claude_export
         claude_export.main()

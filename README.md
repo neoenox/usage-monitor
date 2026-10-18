@@ -46,6 +46,9 @@ python gui.py --tray   # タスクトレイ常駐 (左クリックで開く)
 
 # テスト
 python -m pytest tests -q
+
+# バージョン確認
+python monitor.py --version
 ```
 
 ## 機能
@@ -75,6 +78,8 @@ python -m pytest tests -q
 pip install pyinstaller
 ./build.ps1
 ```
+
+`build.ps1` は `monitor.py` のバージョンからWindowsのバージョンリソースを生成して埋め込むため、exeのプロパティ（詳細）の「製品バージョン」「ファイルバージョン」でリリース版を確認できます。GUIのexeはコンソールを持たないため `--version` は何も表示せず終了します（バージョンはウィンドウタイトルかプロパティで確認）。
 
 ## 平均使用率とペース配分
 
