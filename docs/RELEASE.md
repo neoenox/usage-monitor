@@ -23,8 +23,9 @@ release notes to keep in sync. Locally: `python release_notes.py 0.6.4`.
 
 1. Bump `monitor.__version__` in `monitor.py`.
 2. Add the `## [vX.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (`Added` / `Changed` /
-   `Fixed` / `CI` / `Docs` as applicable) plus its link definition, and point the
-   `[Unreleased]` definition at the new tag.
+   `Fixed` / `CI` / `Docs` as applicable) plus its link definition. Move the entries that
+   accumulated under `## [Unreleased]` into it; that heading stays at the top, empty again,
+   and its link definition points at the new tag.
 3. `python -m pytest tests -q` — the version contract must pass.
 4. Merge the PR, then tag the merge commit and push the tag:
 
@@ -50,6 +51,23 @@ The `Release` workflow runs on `windows-latest`:
    already exists — a previous attempt left a draft, or a partial upload — the assets are
    re-uploaded with `--clobber` and the release is un-drafted, so the run is retryable
    instead of needing manual repair.
+
+## Reading a failed run
+
+The test suite is the gate that stops a bad release, so a red run has to say *why*:
+
+- Every test that launches a process goes through the `run_process` fixture
+  (`tests/conftest.py`). On a non-zero exit or a timeout the failure message carries the
+  command, the timeout, how long the call actually took, the exit code and the tail of
+  both streams — enough to tell a hang from a slow cold start from a real crash. The
+  default timeout is 120 s and can be raised for a slow runner with
+  `USAGE_MONITOR_TEST_TIMEOUT` (seconds) without editing a test.
+- `--durations=10` is always on (`pytest.ini`), so the log ends with the slowest tests.
+  Those E2E launches normally take 0.1–1.2 s, so a two-minute entry is a hang rather than
+  a slow machine.
+
+Read the whole `Run tests` step output: the failing test is named in the short summary,
+above the durations list.
 
 ## Dry run
 

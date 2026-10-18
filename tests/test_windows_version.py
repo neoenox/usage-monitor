@@ -1,7 +1,6 @@
 """バージョンリソース生成と `--version` の入口テスト (#77)。"""
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 
@@ -44,9 +43,7 @@ def test_generator_writes_resource_file(tmp_path):
     assert f"u'{m.__version__}'" in text
 
 
-def test_gui_version_flag_exits_without_window():
+def test_gui_version_flag_exits_without_window(run_process):
     """`--version` はウィンドウを作らず即終了し、コンソールがあれば表示する。"""
-    proc = subprocess.run([sys.executable, "gui.py", "--version"], cwd=ROOT,
-                          capture_output=True, text=True, timeout=120)
-    assert proc.returncode == 0, proc.stderr[-300:]
+    proc = run_process([sys.executable, "gui.py", "--version"], cwd=ROOT)
     assert m.__version__ in proc.stdout

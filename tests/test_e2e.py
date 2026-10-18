@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import os
 import sys
 import time
 from pathlib import Path
@@ -12,14 +12,12 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_cli_json_e2e(fake_home, tmp_path):
+def test_cli_json_e2e(run_process, fake_home):
     """monitor.py を別プロセスで実行しJSON出力を検証。"""
-    proc = subprocess.run(
+    proc = run_process(
         [sys.executable, str(ROOT / "monitor.py"), "--json", "--home", str(fake_home)],
-        capture_output=True, text=True, timeout=120,
-        env={"PATH": __import__("os").environ["PATH"], "SYSTEMROOT": __import__("os").environ.get("SYSTEMROOT", "")},
+        env={"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")},
     )
-    assert proc.returncode == 0, proc.stderr[-500:]
     data = json.loads(proc.stdout)
     assert data["codex"]["input"] == 8000
     assert data["claude"]["messages"] == 1

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,85 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import monitor as m  # noqa: E402
+
+
+# --- 実プロセス起動の共通ヘルパー -------------------------------------------
+# E2Eは本物のプロセスを起動する。落ちたときの理由がトレースバックだけでは
+# 分からない (素の subprocess.TimeoutExpired、windowedビルドの空stderr) ため、
+# 起動は run_process() を通す: コマンド・timeout・実際の所要時間・終了コード・
+# 両ストリームの末尾を失敗メッセージに残す。
+
+DEFAULT_PROCESS_TIMEOUT = 120.0
+_STREAM_TAIL = 2000
+
+
+def _process_timeout() -> float:
+    """既定のtimeout。遅いランナー向けに USAGE_MONITOR_TEST_TIMEOUT で上書きできる。"""
+    raw = os.environ.get("USAGE_MONITOR_TEST_TIMEOUT", "").strip()
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return DEFAULT_PROCESS_TIMEOUT
+        if value > 0:
+            return value
+    return DEFAULT_PROCESS_TIMEOUT
+
+
+def _tail(text, limit: int = _STREAM_TAIL) -> str:
+    text = text or ""
+    if not text.strip():
+        return "<empty>"
+    if len(text) <= limit:
+        return text
+    return f"<... {len(text) - limit} earlier chars omitted ...>\n{text[-limit:]}"
+
+
+def _report(cmd, cwd, timeout, elapsed, outcome, returncode, stdout, stderr) -> str:
+    return "\n".join([
+        outcome,
+        f"command: {' '.join(cmd)}",
+        f"cwd: {cwd or Path.cwd()}",
+        f"timeout: {timeout:g}s (USAGE_MONITOR_TEST_TIMEOUT overrides)",
+        f"duration: {elapsed:.1f}s",
+        f"returncode: {returncode}",
+        f"--- stdout (tail) ---\n{_tail(stdout)}",
+        f"--- stderr (tail) ---\n{_tail(stderr)}",
+    ])
+
+
+def run_process(cmd, *, timeout=None, env=None, cwd=None, input=None, expect=0):
+    """テスト用 ``subprocess.run``: 出力を捕捉し、失敗時は理由を明示する。
+
+    ``expect`` は要求する終了コード (既定 0)。失敗するはずの呼び出しでは
+    ``expect=None`` を渡し、戻り値のプロセスに対して自分で assert する。
+    """
+    cmd = [str(part) for part in cmd]
+    timeout = _process_timeout() if timeout is None else timeout
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+                              timeout=timeout, env=env, cwd=cwd, input=input)
+    except subprocess.TimeoutExpired as exc:
+        elapsed = time.monotonic() - started
+        raise AssertionError(_report(
+            cmd, cwd, timeout, elapsed,
+            f"process timed out after {timeout:g}s (killed; partial output below)",
+            getattr(exc, "returncode", None) or "killed",
+            exc.stdout, exc.stderr)) from None
+    elapsed = time.monotonic() - started
+    if expect is not None:
+        assert proc.returncode == expect, _report(
+            cmd, cwd, timeout, elapsed,
+            f"process exited {proc.returncode}, expected {expect}",
+            proc.returncode, proc.stdout, proc.stderr)
+    return proc
+
+
+@pytest.fixture(name="run_process")
+def _run_process_fixture():
+    """``run_process`` ヘルパーをテストから使えるようにする (importに依存しない)。"""
+    return run_process
 
 
 @pytest.fixture(scope="session")

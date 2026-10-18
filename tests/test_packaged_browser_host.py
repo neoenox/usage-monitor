@@ -6,7 +6,6 @@ temporary directory so no user state is touched.
 """
 import json
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -22,35 +21,34 @@ pytestmark = pytest.mark.skipif(
     reason="Opt-in packaged artifact integration")
 
 
-def _run(args, tmp_path):
+def _run(run_process, args, tmp_path):
     env = dict(os.environ, LOCALAPPDATA=str(tmp_path))
-    return subprocess.run([str(HOST.resolve()), *args], env=env, timeout=30,
-                          capture_output=True, text=True, errors="replace")
+    return run_process([str(HOST.resolve()), *args], env=env, timeout=30, expect=None)
 
 
-def test_host_imports_numeric_payload_to_temp_appdata(tmp_path):
+def test_host_imports_numeric_payload_to_temp_appdata(run_process, tmp_path):
     payload = {"rate_limits": {
         "five_hour": {"used_percentage": 25, "resets_at": 2000000000},
         "seven_day": {"used_percentage": 40, "resets_at": 2000000000}}}
     source = tmp_path / "payload.json"
     source.write_text(json.dumps(payload), encoding="utf-8")
 
-    proc = _run(["--import", str(source)], tmp_path)
-    assert proc.returncode == 0, proc.stderr[-300:]
+    proc = _run(run_process, ["--import", str(source)], tmp_path)
+    assert proc.returncode == 0
 
     saved = json.loads((tmp_path / "usage-monitor" / "claude-browser-quota.json").read_text(encoding="utf-8"))
     assert saved["windows"]["five_hour"]["utilization"] == 25
     assert saved["windows"]["seven_day"]["utilization"] == 40
 
 
-def test_host_rejects_invalid_extension_id_without_writing(tmp_path):
-    proc = _run(["--register", "not-a-valid-id"], tmp_path)
+def test_host_rejects_invalid_extension_id_without_writing(run_process, tmp_path):
+    proc = _run(run_process, ["--register", "not-a-valid-id"], tmp_path)
     assert proc.returncode != 0
     assert not (tmp_path / "usage-monitor" / "browser-native-host.json").exists()
 
 
-def test_host_requires_extension_origin(tmp_path):
-    proc = _run([], tmp_path)
+def test_host_requires_extension_origin(run_process, tmp_path):
+    proc = _run(run_process, [], tmp_path)
     assert proc.returncode != 0
     assert "extension" in (proc.stdout + proc.stderr).lower()
 

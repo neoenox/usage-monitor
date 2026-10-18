@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are in JST.
 
+## [Unreleased]
+
+### Changed
+
+- End-to-end tests that launch a real process now report why it failed. They all go through
+  a shared `run_process` helper (`tests/conftest.py`) that names the command, the timeout,
+  the measured duration, the exit code and the tail of both streams, so a hang can be told
+  apart from a slow cold start from a real crash; a single unreproduced failure during the
+  v0.6.4 release could not be identified for want of exactly this. `--durations=10` is now
+  always on, and `USAGE_MONITOR_TEST_TIMEOUT` raises the default 120 s timeout for a slow
+  runner (#90).
+
 ## [v0.6.4] - 2026-10-18
 
 ### Added

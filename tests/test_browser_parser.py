@@ -4,7 +4,6 @@ Reset times are built relative to the runner clock because the parser
 interprets them in the machine-local timezone (same as the real page).
 """
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -33,21 +32,20 @@ console.log(JSON.stringify({ja: !!ja, en: !!en,
 """ % str(PARSER)
 
 
-def run_node(script: str) -> str:
-    proc = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
-    assert proc.returncode == 0, proc.stderr
+def run_node(run_process, script: str) -> str:
+    proc = run_process(["node", "-e", script], timeout=30)
     return proc.stdout.strip()
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
-def test_parser_accepts_japanese_and_english():
+def test_parser_accepts_japanese_and_english(run_process):
     import json
-    result = json.loads(run_node(SCRIPT))
+    result = json.loads(run_node(run_process, SCRIPT))
     assert result == {"ja": True, "en": True, "ja5": 15, "en7": 70}
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
-def test_parser_rejects_unknown_labels():
+def test_parser_rejects_unknown_labels(run_process):
     script = (
         "const p=require(%r);"
         "const bad=p.parseRows(["
@@ -56,4 +54,4 @@ def test_parser_rejects_unknown_labels():
         "console.log(JSON.stringify({bad}));"
     ) % str(PARSER)
     import json
-    assert json.loads(run_node(script)) == {"bad": None}
+    assert json.loads(run_node(run_process, script)) == {"bad": None}
