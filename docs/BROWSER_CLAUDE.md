@@ -42,3 +42,7 @@ Chrome拡張の追加とローカル連携の登録はユーザーの承認後�
 受信プログラム（`usage-monitor-browser-host.exe`）はリポジトリの `build.ps1` でビルドします（`usage-monitor.exe` と同時に生成、アイコンとバージョンリソース付き）。単体でビルドする場合は、先に `python windows_version.py --out build/version-info.txt --filename usage-monitor-browser-host.exe` でバージョンリソースを生成し、`python -m PyInstaller --onefile --console --name usage-monitor-browser-host --version-file build/version-info.txt claude_browser.py` を実行します。標準入出力はChromeのnative messaging形式です。通信仕様は[Chrome公式ドキュメント](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging)に従います。
 
 解除はChromeの拡張機能画面からこの拡張を削除します。必要なら現在ユーザーの `Software\Google\Chrome\NativeMessagingHosts\com.neoenox.usage_monitor` 登録キーだけを削除します。Claudeの認証設定を変更する必要はありません。
+
+## テスト
+
+拡張機能（`background.js` / `parser.js`）のJSロジックは `tests/*.test.cjs` の node テストで検証します。`python -m pytest tests -q` を実行すればこのテストも含まれます（`tests/test_browser_node_suite.py` が `node --test` を呼びます）。JSだけを直接実行する場合は `node --test "tests/**/*.test.cjs"` を使ってください。`node --test tests/` は node 22 では `MODULE_NOT_FOUND` になり、テストが失敗したように見えるため使わないでください。

@@ -44,8 +44,11 @@ python monitor.py --json
 python gui.py
 python gui.py --tray   # タスクトレイ常駐 (左クリックで開く)
 
-# テスト
+# テスト (browser-extension の node テストも pytest 経由で実行されます)
 python -m pytest tests -q
+
+# 拡張機能の JS テストだけを走らせる場合
+node --test "tests/**/*.test.cjs"
 
 # バージョン確認
 python monitor.py --version
