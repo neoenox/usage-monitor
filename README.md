@@ -81,6 +81,8 @@ pip install pyinstaller
 
 `build.ps1` は `monitor.py` のバージョンからWindowsのバージョンリソースを生成して埋め込むため、exeのプロパティ（詳細）の「製品バージョン」「ファイルバージョン」でリリース版を確認できます。GUIのexeはコンソールを持たないため `--version` は何も表示せず終了します（バージョンはウィンドウタイトルかプロパティで確認）。
 
+リリースはタグ `vX.Y.Z` の push で `.github/workflows/release.yml` がビルド・検査・公開まで行います。手順と検証内容は [docs/RELEASE.md](docs/RELEASE.md) を参照してください。
+
 ## 平均使用率とペース配分
 
 5時間枠は時間あたり、週間枠は日あたりの平均使用率と利用目安を表示します。
@@ -94,7 +96,7 @@ pip install pyinstaller
 ## フォルダー構成
 
 - ルート: 起動用プログラム・設定・ビルド手順
-- docs/: 配布条件・検証記録・ロールバック記録
+- docs/: 配布条件・リリース手順・検証記録・ロールバック記録
 - tests/: テスト
 - assets/: アイコン素材
 - outputs/: ローカル作業記録（screenshots / backups / diagnostics / reviews）。Git管理外で、必要になったときに作られます

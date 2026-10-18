@@ -1,0 +1,82 @@
+# Release procedure
+
+Tagging is the release trigger: `.github/workflows/release.yml` builds, verifies and
+publishes both executables in one run. What remains manual is the version bump and the
+verification record.
+
+## Contract
+
+Three things must agree, and each is enforced:
+
+| Thing | Where | Checked by |
+| --- | --- | --- |
+| `monitor.__version__` | `monitor.py` | `tests/test_version_consistency.py` (CI) |
+| The newest `## [vX.Y.Z] - YYYY-MM-DD` heading | `CHANGELOG.md` | same test (CI) |
+| The tag `vX.Y.Z` | git / the release workflow | release workflow, before building |
+| The embedded Windows version resource `X.Y.Z.0` | the built executables | release workflow, after building |
+
+`release_notes.py` prints (or writes with `--out`) the changelog section for a version, so
+the published notes are the changelog text itself and there is no second copy of the
+release notes to keep in sync. Locally: `python release_notes.py 0.6.4`.
+
+## Prepare a release (PR to master)
+
+1. Bump `monitor.__version__` in `monitor.py`.
+2. Add the `## [vX.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (`Added` / `Changed` /
+   `Fixed` / `CI` / `Docs` as applicable) plus its link definition, and point the
+   `[Unreleased]` definition at the new tag.
+3. `python -m pytest tests -q` — the version contract must pass.
+4. Merge the PR, then tag the merge commit and push the tag:
+
+   ```powershell
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+
+## What the tag push does
+
+The `Release` workflow runs on `windows-latest`:
+
+1. **Resolve and check the tag** — requires `vX.Y.Z`, confirms the tagged commit is an
+   ancestor of `master`, compares the tag with `monitor.__version__`, runs the version
+   contract test, and writes the changelog notes to `notes.md`.
+2. **Run the full test suite** with the 70% coverage floor (`.coveragerc`).
+3. **Build** both executables with `build.ps1` (icon + version resource from
+   `windows_version.py`).
+4. **Verify the executables** — each must exist and report version resource `X.Y.Z.0`; the
+   SHA-256 of each is printed to the run log and the job summary.
+5. **Run the packaged tests** (`TEST_PACKAGED_EXPORT=1`).
+6. **Publish** the release with the changelog notes and both assets. If the release
+   already exists — a previous attempt left a draft, or a partial upload — the assets are
+   re-uploaded with `--clobber` and the release is un-drafted, so the run is retryable
+   instead of needing manual repair.
+
+## Dry run
+
+Actions → Release → Run workflow with an existing tag and `publish` left unchecked. It
+builds and verifies everything and uploads the exes as a workflow artifact without
+touching any release. Use this after changing the workflow.
+
+With `publish` checked it does exactly what a tag push does, for a tag that already
+exists.
+
+## After the release
+
+1. Download the published assets and compare their SHA-256 with the run summary and with a
+   local `build.ps1` build:
+
+   ```powershell
+   gh release download vX.Y.Z --dir <tmpdir> --clobber
+   ```
+
+2. Record the verification in `docs/ISSUE_VERIFICATION.md` (follow the existing release
+   records) and state anything the run could not check.
+3. If the release is wrong, see `docs/ROLLBACK.md`: land a fix and tag a new patch version.
+   Tags are never moved.
+
+## Deliberately not automated
+
+- Reloading the unpacked browser extension at `chrome://extensions`: it needs the user's
+  own Chrome session.
+- The verification record in `docs/ISSUE_VERIFICATION.md`: it reports what was actually
+  observed on the published assets, so it is written per release.
