@@ -67,6 +67,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"release_notes: {exc}", file=sys.stderr)
         return 1
     if out is None:
+        try:
+            # A Windows console may still use a legacy code page (cp932 and
+            # friends). Escape whatever it cannot encode instead of turning a
+            # notes dump into a traceback.
+            sys.stdout.reconfigure(errors="backslashreplace")
+        except (AttributeError, ValueError, OSError):
+            pass
         print(body)
     else:
         Path(out).write_text(body + "\n", encoding="utf-8")
