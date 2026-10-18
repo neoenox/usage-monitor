@@ -8,8 +8,8 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - Report the current release version again. `__version__` had stayed at `0.5.2`
-  while `v0.6.0` and `v0.6.1` were tagged, so the published `v0.6.1` binaries
-  printed `0.5.2` for `--version` and in the window title.
+  while `v0.6.0` and `v0.6.1` were tagged, so the `v0.6.1` build showed `0.5.2`
+  in the window title and for `python monitor.py --version`.
 
 ### CI
 
