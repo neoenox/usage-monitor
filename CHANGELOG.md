@@ -3,6 +3,24 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are in JST.
 
+## [v0.6.3] - 2026-10-18
+
+### Fixed
+
+- The packaged executables now expose their version. `build.ps1` embeds a
+  Windows version resource generated from `monitor.__version__`, so the file
+  properties (Details) and `(Get-Item .\usage-monitor.exe).VersionInfo` report
+  the release version. `usage-monitor.exe --version` no longer starts the GUI;
+  it exits immediately without a window and prints only when a console is
+  attached (#77, #78).
+
+### CI
+
+- GitHub Actions run on Node 24 with the current action majors
+  (`actions/checkout@v7`, `actions/setup-python@v7`,
+  `actions/upload-artifact@v7`), which removes the Node.js 20 deprecation
+  annotation from every run (#76).
+
 ## [v0.6.2] - 2026-10-18
 
 ### Fixed
@@ -103,7 +121,8 @@ extraction in favour of documented, credential-free observation paths.
 
 Baseline tagged release. See the repository history for earlier changes.
 
-[Unreleased]: https://github.com/neoenox/usage-monitor/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/neoenox/usage-monitor/compare/v0.6.3...HEAD
+[v0.6.3]: https://github.com/neoenox/usage-monitor/compare/v0.6.2...v0.6.3
 [v0.6.2]: https://github.com/neoenox/usage-monitor/compare/v0.6.1...v0.6.2
 [v0.6.1]: https://github.com/neoenox/usage-monitor/compare/v0.6.0...v0.6.1
 [v0.6.0]: https://github.com/neoenox/usage-monitor/compare/v0.5.0...v0.6.0
