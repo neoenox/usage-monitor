@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The browser extension's node tests now run inside the normal pytest run, and therefore in
+  CI on both platforms and in the release pipeline: `tests/test_browser_node_suite.py` drives
+  `node --test` over `tests/*.test.cjs` (18 tests over `background.js` and `parser.js`).
+  They previously ran nowhere — the release workflow only ran pytest, so an extension-only
+  regression could be published — and the obvious `node --test tests/` fails with
+  `MODULE_NOT_FOUND` on Node 22, which looks like a broken suite (#91).
 - End-to-end tests that launch a real process now report why it failed. They all go through
   a shared `run_process` helper (`tests/conftest.py`) that names the command, the timeout,
   the measured duration, the exit code and the tail of both streams, so a hang can be told

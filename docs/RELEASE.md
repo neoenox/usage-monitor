@@ -41,7 +41,9 @@ The `Release` workflow runs on `windows-latest`:
 1. **Resolve and check the tag** — requires `vX.Y.Z`, confirms the tagged commit is an
    ancestor of `master`, compares the tag with `monitor.__version__`, runs the version
    contract test, and writes the changelog notes to `notes.md`.
-2. **Run the full test suite** with the 70% coverage floor (`.coveragerc`).
+2. **Run the full test suite** with the 70% coverage floor (`.coveragerc`) — this includes the
+   browser extension's node tests, which `tests/test_browser_node_suite.py` drives through
+   `node --test`.
 3. **Build** both executables with `build.ps1` (icon + version resource from
    `windows_version.py`).
 4. **Verify the executables** — each must exist and report version resource `X.Y.Z.0`; the
