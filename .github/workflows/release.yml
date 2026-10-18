@@ -76,6 +76,15 @@ jobs:
           }
           python -m pytest tests/test_version_consistency.py -q --capture=sys
           if ($LASTEXITCODE -ne 0) { throw "The changelog version contract failed" }
+          if (-not (Test-Path release_notes.py)) {
+            # Dry run on a tag older than this workflow: read the notes helper from
+            # the branch we were dispatched from, but keep the tag's own CHANGELOG.
+            git show FETCH_HEAD:release_notes.py > release_notes.py
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path release_notes.py)) {
+              throw "release_notes.py is missing from $env:TAG and could not be read from master"
+            }
+            Write-Host "release_notes.py taken from master because $env:TAG predates it"
+          }
           python release_notes.py $env:VERSION --out notes.md
           if ($LASTEXITCODE -ne 0) { throw "CHANGELOG.md has no section for $env:TAG" }
 
