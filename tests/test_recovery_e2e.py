@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -113,7 +112,7 @@ def test_corrupt_cache_is_unavailable_without_error(tmp_path):
     assert claude["oauth"]["status"] == "error"
 
 
-def test_cli_restart_reports_quota_with_corrupt_cache_present(fake_home, tmp_path):
+def test_cli_restart_reports_quota_with_corrupt_cache_present(run_process, fake_home, tmp_path):
     """Real subprocess restart: on-disk quota is reported even beside a corrupt cache."""
     claude_export.export(_quota(five=30.0), claude_export.path(fake_home))
     appdata = tmp_path / "appdata"
@@ -123,10 +122,9 @@ def test_cli_restart_reports_quota_with_corrupt_cache_present(fake_home, tmp_pat
     env = {"PATH": os.environ["PATH"],
            "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
            "LOCALAPPDATA": str(appdata)}
-    proc = subprocess.run(
+    proc = run_process(
         [sys.executable, str(ROOT / "monitor.py"), "--json", "--home", str(fake_home)],
-        capture_output=True, text=True, timeout=120, env=env)
-    assert proc.returncode == 0, proc.stderr[-500:]
+        env=env)
     data = json.loads(proc.stdout)
     assert data["claude"]["oauth"]["status"] == "ok"
     assert data["claude"]["oauth"]["five_hour"]["utilization"] == 30.0
