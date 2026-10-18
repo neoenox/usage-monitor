@@ -76,6 +76,28 @@ def test_main_prints_writes_and_reports_errors(tmp_path, monkeypatch, capsys):
     assert release_notes.main(['1.2.0', '--out']) == 2
 
 
+def test_stdout_survives_a_legacy_console_codepage(tmp_path):
+    """cp932 などのコンソールでも標準出力で例外にしない。
+
+    実際に落ちた経路 (Windows の日本語コンソール) を子プロセスで再現する。
+    """
+    import os
+    import shutil
+    import subprocess
+    import sys
+
+    shutil.copy(release_notes.__file__, tmp_path / 'release_notes.py')
+    (tmp_path / release_notes.CHANGELOG_NAME).write_text(
+        FAKE.replace('new thing', 'new thing \u2014 em dash'), encoding='utf-8')
+
+    proc = subprocess.run(
+        [sys.executable, 'release_notes.py', '1.2.0'], cwd=tmp_path,
+        capture_output=True, text=True, check=False,
+        env=dict(os.environ, PYTHONIOENCODING='cp932'))
+    assert proc.returncode == 0, proc.stderr
+    assert 'new thing' in proc.stdout
+
+
 def test_real_changelog_yields_notes_for_the_current_version():
     """リポジトリの CHANGELOG が現在のバージョンのノートを生成できる。"""
     text = (Path(release_notes.ROOT) / release_notes.CHANGELOG_NAME).read_text(encoding='utf-8')
