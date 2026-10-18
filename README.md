@@ -72,7 +72,7 @@ python monitor.py --version
 
 ## exe化
 
-ビルドは `build.ps1` の引数指定方式に統一する（アイコン付き）。PyInstallerが生成する `*.spec` はローカル生成物として無視し、Gitには追加しない。
+ビルドは `build.ps1` に統一する（アイコンとバージョンリソース付きで `usage-monitor.exe` と `usage-monitor-browser-host.exe` を生成）。PyInstallerが生成する `*.spec` はローカル生成物として無視し、Gitには追加しない。
 
 ```powershell
 pip install pyinstaller
@@ -97,6 +97,6 @@ pip install pyinstaller
 - docs/: 配布条件・検証記録・ロールバック記録
 - tests/: テスト
 - assets/: アイコン素材
-- outputs/: 作業記録（screenshots / backups / diagnostics / reviews）
+- outputs/: ローカル作業記録（screenshots / backups / diagnostics / reviews）。Git管理外で、必要になったときに作られます
 - build/: ビルド中間ファイル
 - dist/: 起動用exe
