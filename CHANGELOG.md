@@ -28,6 +28,15 @@ All notable changes to this project are documented here. The format follows
   always on, and `USAGE_MONITOR_TEST_TIMEOUT` raises the default 120 s timeout for a slow
   runner (#90).
 
+### CI
+
+- A tag whose `## [Unreleased]` section still has entries now fails the release before
+  anything is built or published. The published notes are cut from the version section alone,
+  so a forgotten move used to drop those entries silently; the workflow now runs
+  `release_notes.py --check-unreleased` against the tag's `CHANGELOG.md`. The check always
+  uses the helper from the dispatched branch, so dry-running an older tag — whose changelog
+  predates the heading — still passes, and the notes still come from the tag (#93).
+
 ## [v0.6.4] - 2026-10-18
 
 ### Added

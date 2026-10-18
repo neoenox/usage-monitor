@@ -6,18 +6,25 @@ verification record.
 
 ## Contract
 
-Three things must agree, and each is enforced:
+Four things must agree, and each is enforced:
 
 | Thing | Where | Checked by |
 | --- | --- | --- |
 | `monitor.__version__` | `monitor.py` | `tests/test_version_consistency.py` (CI) |
 | The newest `## [vX.Y.Z] - YYYY-MM-DD` heading | `CHANGELOG.md` | same test (CI) |
 | The tag `vX.Y.Z` | git / the release workflow | release workflow, before building |
+| An empty `## [Unreleased]` section | `CHANGELOG.md` | release workflow, before building |
 | The embedded Windows version resource `X.Y.Z.0` | the built executables | release workflow, after building |
 
 `release_notes.py` prints (or writes with `--out`) the changelog section for a version, so
 the published notes are the changelog text itself and there is no second copy of the
 release notes to keep in sync. Locally: `python release_notes.py 0.6.4`.
+
+`python release_notes.py --check-unreleased` is the other half of that contract: it exits
+non-zero while entries are still under `## [Unreleased]`. The notes are cut from the version
+section alone, so anything left above it never reaches the release. The workflow runs the
+check before building, which turns a forgotten move into a failed run instead of a silent
+omission.
 
 ## Prepare a release (PR to master)
 
@@ -25,7 +32,9 @@ release notes to keep in sync. Locally: `python release_notes.py 0.6.4`.
 2. Add the `## [vX.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (`Added` / `Changed` /
    `Fixed` / `CI` / `Docs` as applicable) plus its link definition. Move the entries that
    accumulated under `## [Unreleased]` into it; that heading stays at the top, empty again,
-   and its link definition points at the new tag.
+   and its link definition points at the new tag. Confirm the move with
+   `python release_notes.py --check-unreleased`, which must report nothing pending — the
+   workflow refuses a tag whose `## [Unreleased]` still has entries.
 3. `python -m pytest tests -q` — the version contract must pass.
 4. Merge the PR, then tag the merge commit and push the tag:
 
@@ -40,7 +49,8 @@ The `Release` workflow runs on `windows-latest`:
 
 1. **Resolve and check the tag** — requires `vX.Y.Z`, confirms the tagged commit is an
    ancestor of `master`, compares the tag with `monitor.__version__`, runs the version
-   contract test, and writes the changelog notes to `notes.md`.
+   contract test, writes the changelog notes to `notes.md`, and fails if `## [Unreleased]`
+   still has entries (those would be missing from the published notes).
 2. **Run the full test suite** with the 70% coverage floor (`.coveragerc`) — this includes the
    browser extension's node tests, which `tests/test_browser_node_suite.py` drives through
    `node --test`.
@@ -83,7 +93,9 @@ exists.
 The dry run checks out the tag, so the tag must be one that already embeds a version
 resource (`v0.6.3` or later) — earlier builds have no resource to verify. If the tag
 predates a helper the workflow uses, that helper is taken from `master` for the run while
-the release notes still come from the tag's own `CHANGELOG.md`.
+the release notes still come from the tag's own `CHANGELOG.md`. The `Unreleased` check is
+always run that way — it is release policy rather than tag content — so a tag whose
+changelog predates the heading passes it.
 
 ## After the release
 

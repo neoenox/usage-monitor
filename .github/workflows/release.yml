@@ -87,6 +87,21 @@ jobs:
           }
           python release_notes.py $env:VERSION --out notes.md
           if ($LASTEXITCODE -ne 0) { throw "CHANGELOG.md has no section for $env:TAG" }
+          # Entries left under '## [Unreleased]' would silently never reach the published
+          # notes, so the section has to be empty once the tag exists. The rule is release
+          # policy rather than tag content, so the check always runs the helper from the
+          # dispatched branch (which reads this checkout's CHANGELOG): a tag that predates
+          # --check-unreleased, or the heading itself, is still checked the same way.
+          git show FETCH_HEAD:release_notes.py > release_notes_policy.py
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path release_notes_policy.py)) {
+            throw "Could not read the Unreleased check from master's release_notes.py"
+          }
+          python release_notes_policy.py --check-unreleased
+          $policy = $LASTEXITCODE
+          Remove-Item release_notes_policy.py
+          if ($policy -ne 0) {
+            throw "CHANGELOG.md still has entries under '## [Unreleased]' (check exited $policy); move them into the '## [v$env:VERSION]' section. Nothing was published, so fix the changelog and recreate the tag."
+          }
 
       - name: Run the test suite with coverage
         run: python -m pytest tests -q --capture=sys --cov --cov-report=term-missing
