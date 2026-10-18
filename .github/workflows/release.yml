@@ -1,0 +1,145 @@
+name: Release
+
+# タグ push でテスト→ビルド→検査→公開を 1 回の run で行う。手作業での
+# アップロード再試行 (ネットワーク中断で draft が残る等) を無くすのが目的。
+# workflow_dispatch は publish=false ならビルドと検査だけのドライランになる。
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "既存のタグ (例: v0.6.4)"
+        required: true
+      publish:
+        description: "GitHub Release も作成/更新する"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Resolve the release tag
+        id: meta
+        shell: pwsh
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          PUBLISH_INPUT: ${{ inputs.publish }}
+        run: |
+          $tag = if ($env:EVENT -eq 'workflow_dispatch') { $env:INPUT_TAG } else { $env:REF_NAME }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw "Expected a vX.Y.Z tag, got '$tag'" }
+          $publish = ($env:EVENT -eq 'push') -or ($env:PUBLISH_INPUT -eq 'true')
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$($tag.Substring(1))" >> $env:GITHUB_OUTPUT
+          "publish=$($publish.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "Resolved tag=$tag version=$($tag.Substring(1)) publish=$publish"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          check-latest: true
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt pytest pytest-cov tzdata pyinstaller
+
+      - name: Verify the tag, version and changelog agree
+        shell: pwsh
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          # Publishing from a stray commit is a mistake we can still catch here.
+          git fetch --no-tags origin master
+          git merge-base --is-ancestor HEAD FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw "Tag $env:TAG is not an ancestor of master" }
+          $found = python -c "import monitor; print(monitor.__version__)"
+          if ($LASTEXITCODE -ne 0) { throw "Could not read monitor.__version__" }
+          if ($found -ne $env:VERSION) {
+            throw "Tag $env:TAG does not match monitor.__version__ '$found'"
+          }
+          python -m pytest tests/test_version_consistency.py -q --capture=sys
+          if ($LASTEXITCODE -ne 0) { throw "The changelog version contract failed" }
+          python release_notes.py $env:VERSION --out notes.md
+          if ($LASTEXITCODE -ne 0) { throw "CHANGELOG.md has no section for $env:TAG" }
+
+      - name: Run the test suite with coverage
+        run: python -m pytest tests -q --capture=sys --cov --cov-report=term-missing
+
+      - name: Build the executables
+        run: ./build.ps1
+
+      - name: Verify the executables
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          $expected = "$env:VERSION.0"
+          $lines = @('### Built assets', '')
+          foreach ($name in @('usage-monitor.exe', 'usage-monitor-browser-host.exe')) {
+            $path = Join-Path dist $name
+            if (-not (Test-Path $path)) { throw "$name was not built" }
+            $resource = python -c "import pathlib, sys, windows_version as wv; print(wv.read_file_version(pathlib.Path(sys.argv[1])))" $path
+            if ($LASTEXITCODE -ne 0) { throw "Could not read the version resource of $name" }
+            if ($resource -ne $expected) {
+              throw "$name reports version resource '$resource', expected '$expected'"
+            }
+            $hash = (Get-FileHash -Algorithm SHA256 $path).Hash
+            Write-Host "$name resource=$resource sha256=$hash"
+            $lines += '- `' + $name + '` version resource `' + $resource + '` SHA-256 `' + $hash + '`'
+          }
+          $lines | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - name: Run the packaged tests
+        env:
+          TEST_PACKAGED_EXPORT: '1'
+        run: python -m pytest tests/test_packaged_export.py tests/test_packaged_browser_host.py -q --capture=sys
+
+      - name: Upload the built executables
+        if: steps.meta.outputs.publish == 'false'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-executables-${{ steps.meta.outputs.tag }}
+          path: dist/*.exe
+          retention-days: 7
+
+      - name: Publish the release
+        if: steps.meta.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          # Native commands must not throw on a non-zero exit; we check codes ourselves.
+          $ErrorActionPreference = 'Continue'
+          $notes = Test-Path notes.md
+          if (-not $notes) { throw "notes.md was not generated" }
+          $existing = gh release view $env:TAG --json tagName --jq .tagName 2>$null
+          if ($existing) {
+            # A previous attempt may have left a draft or partial assets behind.
+            Write-Host "Updating the existing release $env:TAG"
+            gh release upload $env:TAG dist/usage-monitor.exe dist/usage-monitor-browser-host.exe --clobber
+            if ($LASTEXITCODE -ne 0) { throw "Asset upload failed" }
+            gh release edit $env:TAG --title $env:TAG --notes-file notes.md --draft=false
+          } else {
+            Write-Host "Creating the release $env:TAG"
+            gh release create $env:TAG --title $env:TAG --notes-file notes.md --verify-tag dist/usage-monitor.exe dist/usage-monitor-browser-host.exe
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Publishing $env:TAG failed" }
+          gh release view $env:TAG --json tagName,isDraft,assets --jq '{tagName, isDraft, assets: [.assets[].name]}'
