@@ -67,15 +67,20 @@ the release notes still come from the tag's own `CHANGELOG.md`.
 
 ## After the release
 
-1. Download the published assets and compare their SHA-256 with the run summary and with a
-   local `build.ps1` build:
+1. Download the published assets and compare their SHA-256 with the values the run printed
+   into the job summary:
 
    ```powershell
    gh release download vX.Y.Z --dir <tmpdir> --clobber
    ```
 
+   The assets are built on the runner, so a local `build.ps1` build is **not** expected to
+   be byte-identical (different PyInstaller and Python builds). Compare the version
+   resource (`X.Y.Z.0`) locally, and the SHA-256 against the run.
+
 2. Record the verification in `docs/ISSUE_VERIFICATION.md` (follow the existing release
-   records) and state anything the run could not check.
+   records): the run URL, the tag and commit, the SHA-256 of each published asset, and
+   anything the run could not check.
 3. If the release is wrong, see `docs/ROLLBACK.md`: land a fix and tag a new patch version.
    Tags are never moved.
 
