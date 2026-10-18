@@ -1,6 +1,6 @@
 # Remaining issue implementation and verification
 
-Status (current, 2026-10-17): all review-branch work has landed on `master` and no issue remains open. Verified at `e686ce4`: `python -m pytest tests -q` -> 199 passed, 5 skipped; Windows (with a 70% coverage floor) and Linux CI pass on every PR. Releases `v0.6.0` and `v0.6.1` are published; the `v0.6.1` downloads were re-verified after publication (see the 2026-10-17 record below). The historical review snapshot below (PR #39 / `6dfdda2` / 137 tests) is retained for the record.
+Status (current, 2026-10-18): all review-branch work has landed on `master` and no issue remains open. Verified at `49a2449`: `python -m pytest tests -q` -> 203 passed, 5 skipped; Windows (with a 70% coverage floor, 77.57% measured) and Linux CI pass on every PR. Releases `v0.6.0`, `v0.6.1` and `v0.6.2` are published; the `v0.6.2` downloads were verified after publication (see the 2026-10-18 record below). The historical review snapshot below (PR #39 / `6dfdda2` / 137 tests) is retained for the record.
 
 ## PR dependency and scope (historical — resolved)
 
@@ -63,3 +63,20 @@ Re-verified the published `v0.6.1` release downloads (not the local build) to co
 - `usage-monitor.exe` embeds the brand icon (`app.ico`).
 
 Remaining manual step (owner only, cannot be automated): reload the unpacked extension at `chrome://extensions` so the branding files on disk take effect. The settings tab now flags this as `拡張の更新が未反映（chrome://extensionsで再読み込み）` (#65, #71).
+
+## 2026-10-18 version drift fix and v0.6.2 release
+
+`__version__` stayed at `0.5.2` while `v0.6.0` and `v0.6.1` were tagged (`git show v0.6.1:monitor.py` -> `0.5.2`), so the v0.6.1 build displayed `0.5.2` in the window title (`gui.py:315`) and for `python monitor.py --version` (`monitor.py:580`). The old `test_version` only checked the `X.Y.Z` shape, so nothing caught it. Fixed in PR #74 (`49a2449`, `__version__ = "0.6.2"`) together with a guard that fails CI when `__version__` drifts from the newest CHANGELOG release, when release headings are not newest-first, or when the top heading / `[Unreleased]` lose their link definitions (`tests/test_version_consistency.py`).
+
+Re-verified the published `v0.6.2` downloads (not the local build), as with v0.6.1:
+
+- Both downloaded assets are byte-identical to `dist/` built from `49a2449`: SHA-256 `usage-monitor.exe` = `E097A76594125D8556D90264C6728EE1D957B2DA4CE1010A724B668CEDC00444`, `usage-monitor-browser-host.exe` = `176603062F4B7173972167677EE88E8465AA1C5FC42E9E264823F4F214320CE8`.
+- The `monitor` module extracted from the frozen `usage-monitor.exe` contains exactly one version-like constant: `0.6.2`.
+- Packaged numeric export (`usage-monitor.exe --claude-export`, `LOCALAPPDATA` redirected to a temp dir) exits 0, writes `claude-quota.json` with `five_hour.utilization == 25`, and does not persist the extra `secret` field.
+- Browser host: `--import` exits 0 and writes `five_hour`/`seven_day` utilization; `--register not-a-valid-id` exits 1 without writing a manifest; a no-argument launch exits 1 mentioning the extension origin.
+- `usage-monitor.exe` still embeds the brand icon data (`app.ico` marker present).
+- `TEST_PACKAGED_EXPORT=1 python -m pytest tests/test_packaged_export.py tests/test_packaged_browser_host.py -q` -> 5 passed.
+
+Limitation found while verifying (not fixed here): `usage-monitor.exe --version` does not print a version. The frozen entry point is `gui.py`, which only special-cases `--claude-export`, so the flag launches the GUI instead, and a windowed build has no console to print to. The packaged version is confirmed by the window title; the CLI form is `python monitor.py --version`.
+
+The manual extension reload above still applies to this release: the unpacked extension must be reloaded at `chrome://extensions` for updated on-disk assets (icons, `manifest.json`) to take effect.
