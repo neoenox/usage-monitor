@@ -1,6 +1,6 @@
 # Remaining issue implementation and verification
 
-Status (current, 2026-10-18): all review-branch work has landed on `master` and no issue remains open. Verified at `6229388`: `python -m pytest tests -q` -> 248 passed, 6 skipped; Windows (with a 70% coverage floor, 79.46% measured) and Linux CI pass on every PR, now on Node 24 actions with no deprecation annotation. Releases `v0.6.0` through `v0.6.5` are published; `v0.6.4` was the first one built, verified and published by `.github/workflows/release.yml` from the tag push, and `v0.6.5` is the first one whose `## [Unreleased]` section was gated before the build. The downloads of both were checked against the run after publication (see the v0.6.4 and v0.6.5 records below). The historical review snapshot below (PR #39 / `6dfdda2` / 137 tests) is retained for the record.
+Status (current, 2026-10-19): all review-branch work has landed on `master` and no issue remains open. Verified at `b813355`: `python -m pytest tests -q` -> 262 passed, 6 skipped; Windows (with a 70% coverage floor, 80.39% measured) and Linux CI pass on every PR, now on Node 24 actions with no deprecation annotation. Releases `v0.6.0` through `v0.6.6` are published; `v0.6.4` was the first one built, verified and published by `.github/workflows/release.yml` from the tag push, `v0.6.5` is the first one whose `## [Unreleased]` section was gated before the build, and `v0.6.6` is the first one that ran the per-file node gate and that gate together. The downloads of each were checked against the run after publication (see the records below). The historical review snapshot below (PR #39 / `6dfdda2` / 137 tests) is retained for the record.
 
 ## PR dependency and scope (historical — resolved)
 
@@ -173,5 +173,43 @@ downloads:
 The unreproduced cold-run flake recorded under v0.6.4 has not recurred since (five local runs,
 both CI jobs on every PR, the release run and a `workflow_dispatch` dry run of `v0.6.4`); the
 `run_process` diagnostics added in #90 are what would name it if it returns.
+
+The manual extension reload at `chrome://extensions` still applies to this release.
+
+## 2026-10-19 v0.6.6 release (node gate per file, version-resource reader)
+
+Patch release with no user-facing change. The two entries were the browser extension's node
+gate running one file at a time (#96) and `windows_version.read_file_version` joining the
+normal suite (#97, 56% -> 98%). The tag `v0.6.6` was pushed on the merge commit `b813355` and
+run [39185727410](https://github.com/neoenox/usage-monitor/actions/runs/39185727410) published
+it; every step reported success (the artifact upload is skipped when publishing, as designed).
+
+This is the first tag where both gates added over the previous days ran inside the release
+pipeline: the `Verify the tag, version and changelog agree` step logged
+`release_notes: nothing pending under '## [Unreleased]'`, and the coverage step ran the node
+suite file by file
+(`test_extension_node_file_runs_and_registers_its_tests[browser_content.test.cjs]`, 3.16 s).
+Re-checked afterwards against the published downloads:
+
+- `gh release download v0.6.6 --dir <tmp> --clobber` then SHA-256 over the downloaded bytes:
+  `usage-monitor.exe` = `BEC7820215B82D2DCD5CA4976F72168A807D3E60AB0809D98F81461023C246E6`
+  (20,835,821 bytes), `usage-monitor-browser-host.exe` =
+  `621E9841C1C4271F96EDF2A88E672353583F0329329CF556BC1EC0D2C8FA3449` (8,336,327 bytes).
+  Both equal the hashes the run printed and the `digest` values the API reports, so the
+  published assets are exactly the files the packaged tests and version-resource checks ran
+  against.
+- Embedded version resource: `0.6.6.0` on both executables (read back from the downloaded
+  files with `windows_version.read_file_version`, the function #97 put under test).
+- Notes: the published release body equals the `## [v0.6.6]` section of `CHANGELOG.md`
+  (1064 characters) apart from the trailing blank lines the notes file adds. Before the
+  release, a character-for-character comparison against master's `[Unreleased]` body confirmed
+  the move had lost nothing (1064 characters, both bullets), and
+  `release_notes.py --check-unreleased` reported nothing pending.
+- Release state: `isDraft=false`, `isPrerelease=false`, published 2026-10-19T01:33:02Z, two
+  assets with matching `digest` values, title `v0.6.6`.
+
+The unreproduced cold-run flake recorded under v0.6.4 has still not recurred (both CI jobs on
+every PR and the release run); the `run_process` diagnostics added in #90 are what would name
+it if it returns.
 
 The manual extension reload at `chrome://extensions` still applies to this release.
