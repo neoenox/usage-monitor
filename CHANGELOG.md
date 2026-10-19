@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- `windows_version.read_file_version` is covered by the normal suite now (the module went from
+  56% to 98%). It is the function every release uses to read the embedded `X.Y.Z.0` back out
+  of the built executables, but it was only called from the opt-in packaged tests and the
+  release workflow's verify step, so a regression in it could not be caught before a tag. The
+  new tests read a real resource-bearing binary and check that the parsed major.minor matches
+  the running interpreter, which pins the `VS_FIXEDFILEINFO` field offsets instead of only the
+  `X.Y.Z.0` shape (#97).
 - The browser-extension node gate runs one file at a time now and requires each file to
   register at least one test. Node reports a file that registers nothing as a single passing
   test named after the file, so the previous aggregate check (total count ≥ file count) could
