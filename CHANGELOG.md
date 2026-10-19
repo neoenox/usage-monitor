@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The browser-extension node gate runs one file at a time now and requires each file to
+  register at least one test. Node reports a file that registers nothing as a single passing
+  test named after the file, so the previous aggregate check (total count ≥ file count) could
+  not see a file whose tests had silently stopped being collected: with a probe file of that
+  kind the old guard was green at `# tests 31 / # fail 0`, while the new one fails by name (#96).
+
 ## [v0.6.5] - 2026-10-18
 
 ### Changed

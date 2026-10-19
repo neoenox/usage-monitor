@@ -53,7 +53,7 @@ The `Release` workflow runs on `windows-latest`:
    still has entries (those would be missing from the published notes).
 2. **Run the full test suite** with the 70% coverage floor (`.coveragerc`) — this includes the
    browser extension's node tests, which `tests/test_browser_node_suite.py` drives through
-   `node --test`.
+   `node --test` one file at a time, so a file whose tests stop being registered fails by name.
 3. **Build** both executables with `build.ps1` (icon + version resource from
    `windows_version.py`).
 4. **Verify the executables** — each must exist and report version resource `X.Y.Z.0`; the
