@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [v0.6.6] - 2026-10-19
+
 ### Changed
 
 - `windows_version.read_file_version` is covered by the normal suite now (the module went from
@@ -208,7 +210,8 @@ extraction in favour of documented, credential-free observation paths.
 
 Baseline tagged release. See the repository history for earlier changes.
 
-[Unreleased]: https://github.com/neoenox/usage-monitor/compare/v0.6.5...HEAD
+[Unreleased]: https://github.com/neoenox/usage-monitor/compare/v0.6.6...HEAD
+[v0.6.6]: https://github.com/neoenox/usage-monitor/compare/v0.6.5...v0.6.6
 [v0.6.5]: https://github.com/neoenox/usage-monitor/compare/v0.6.4...v0.6.5
 [v0.6.4]: https://github.com/neoenox/usage-monitor/compare/v0.6.3...v0.6.4
 [v0.6.3]: https://github.com/neoenox/usage-monitor/compare/v0.6.2...v0.6.3
