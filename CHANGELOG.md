@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `claude_browser.py` is at 99% now (was 74%), and the uncovered part was exactly what a
+  person runs: `main()`'s four dispatch paths (`--register`, `--import`, the origin check from
+  Chrome, and serving the native protocol with the binary-mode switch on Windows), `register()`
+  (manifest + current-user registry key, with a fake `winreg` so no real key is touched), and
+  the fallbacks in `extension_id()`, `host_exe()`, `chrome_user_data()`, `extension_state()`,
+  `_newest_mtime()`, `extension_reload_pending()`, `chrome_running()` and `diagnose()`. Both the
+  happy paths and the "every probe fails" paths are pinned (#100).
+
+### Fixed
+
+- `diagnose()` no longer raises when the quota file carries an absurd `observed_at`: JSON integer
+  literals are arbitrary precision, so `float()` can raise `OverflowError`, which the handler did
+  not catch despite the "Never raises" contract. `age_hours` is `None` in that case, as for any
+  other unreadable age (#100).
+
 ## [v0.6.6] - 2026-10-19
 
 ### Changed

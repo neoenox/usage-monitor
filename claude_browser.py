@@ -287,7 +287,9 @@ def diagnose(home=None) -> dict:
     try:
         observed = result.get('observed_at')
         result['age_hours'] = (time.time() - float(observed)) / 3600 if observed else None
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # JSONの整数リテラルは任意精度なので、壊れた観測時刻は float() で
+        # OverflowError になり得る。docstring どおり例外は出さない。
         result['age_hours'] = None
     return result
 
